@@ -1,0 +1,4386 @@
+---
+title: "2020-09-08_transmission_cluster_manuscript"
+author: "Shawn Hawken"
+date: "10/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = getwd())
+getwd()
+# NO longer needed with R project!!!!
+# LOCAL MOUNTED GL PATH
+#setwd('Desktop/gl_mount/Project_KPC_LTACH/Analysis/LTACH_Transmission_Clusters/2020-01-10_transmission_cluster_manuscript/')
+#load(".RData")
+
+#setwd('/nfs/esnitkin/Project_KPC_LTACH/Analysis/LTACH_Transmission_Clusters/2020-01-10_transmission_cluster_manuscript/')
+
+```
+
+## Transmission cluster manuscript analysis
+
+
+## load packages
+```{r}
+
+# load packages
+library(wesanderson)
+library(openxlsx)
+library(pheatmap)
+library(ape)
+library(phangorn)
+library(heatmap3)
+library(heatmap.plus)
+library(reshape)
+library(stringr)
+library(vioplot)
+library(exact2x2)
+library(ggplot2)
+library(phytools)
+library(ggtree)
+library(here)
+library(gridExtra)
+library(hrbrthemes)
+library(viridis)
+library(EMT)
+library(ggpubr)
+library(xtable)
+library(tidytext)
+library( ggnewscale)
+library(stringr)
+library(phylobase)
+
+```
+
+### read in hand curated cluster categories from 9/23/20 discussion w/Evan
+```{r}
+currated.clust.df<-read.xlsx("../../Desktop/gl_mount/Project_KPC_LTACH/Analysis/data/meta_data/data/meta_data/2020-09-23_hand-curated_cluster_categories.xlsx")
+```
+
+
+## load function libraries
+```{r}
+# functions for transmission cluster package
+source('../lib/2020-04-16_functions_for_tranansmission_package.R')
+
+# Evan's transmission detection code
+#/nfs/esnitkin/Project_KPC_LTACH/Analysis/LTACH_Transmission_Clusters/2020-02-09_Updated_analysis_with_new_variant_alignment/2020-02-08_st258_kpc_cluster_floor_overlap_sample_filt.R
+
+```
+
+## Read in files with LTACH data
+__Genomic data files:__ 
+  - Gubbins filtered DNA sequence alignment 
+  - VCF file corresponding to alignment  
+  - tree (not necessary if NJ tree since this is generated from alignment)  
+  - SNP matrix files for mutational analyses
+  - PanIsa output table with info from searching for large insertion sequences
+  
+__Clinical data files:__  
+  - bed trace data  
+  - surveillance data  
+  - clinical covariates data (age, gender,length of stay, device exposure, discharge disposition)  
+  - medication exposure data  
+  - clinical micro data  
+  
+__Variables to define:__ 
+
+  Genomic variables:
+  - type of tree (NJ vs read in external tree)
+
+  Clinical variables:  
+    -duration for index patient admission   
+    -duration for serial exposure to count as serial exposure  
+__Other__
+
+  -Kleborate output file
+  
+```{r}
+
+## 1. Read in all data files needed for analyses and define option variables for functions that have them  
+
+#
+# Files with LTACH C data
+#
+
+# read in genomic files and format variables
+sample.file<- '../../data/meta_data/2017-12-05_Rush_KPC_LTACH_isolates-20.xlsx' # loopup between patients and sequenced samples from patients
+
+# single reference alignment
+dna.file<-'../../../../Daniel/snp_matrix/LTACH_output_core/2018_12_19_11_57_15_core_results/gubbins/2018_12_19_11_57_15_KPNIH1_genome_aln_w_ref_allele_gubbins.filtered_polymorphic_sites.fasta' #gubbins filtered core genome alignment with KPNIH1 reference genome
+
+vcf.file<-'../../../../Daniel/snp_matrix/LTACH_output_core/2018_12_19_11_57_15_core_results/gubbins/2018_12_19_11_57_15_KPNIH1_genome_aln_w_ref_allele_gubbins.summary_of_snp_distribution.vcf' #vcf file corresponding to filtered core genome alignment in dna.file
+
+
+MLST.file<-'../../../Sequence_data/Report/2019_02_12_18_05_05_MLST_report.txt'
+
+# read in clinical files and format variables
+room.lookup<- '../../data/meta_data/LTACH_room_lookup.xlsx' #curated link between room/ward/floors based on blueprints
+surv.file<- '../../data/meta_data/2018-07-24_KPCLTACH_C_ADMPPS_CxResults.xlsx' # surveillance file
+trace.file<-'../../data/meta_data/2018-07-24_KPCLTACH_C_BedTracer.xlsx' # bed trace file
+
+#clin.micro.file
+clin.micro.file<-'../../data/meta_data/KPCLTACH_C_ClinicalMicro-2.xlsx'
+
+#census file
+census.file<-'../../data/meta_data/2019-02-25_KPCLTACH_C_Census.xlsx'
+# Variables to define:
+# specify tree file if wanting to use a tree that is not a NJ tree based on alignment
+external.tree.file<-NA #NA for using a NJ tree for cluster detection
+
+#
+# Variables to define:
+#
+
+# define options for function calls
+hai.def<-3 # 3 day threshold for imporation vs acquisition in the LTACH
+increase.trans.time<-0 # used for widen.interval for AcquisTimeMat & TransTimeMat: 0 = do not increase time before last negative culture that a patient could have acquired CRKP
+prefix.char.genome<-'gubbins_filtered_single_reference' # for naming files related to input alignment
+prefix.char.hai<-'3_day_HAI_def' # prefix for naming files/plot titles for transmission/acquisition time plots
+
+#
+# Other
+#
+
+#Kleborate results for virulence factor and resistance genes for patients
+kleborate.df<-read.table('../2019-11-13_Kleborate_analysis/LTACH_C_kleborate_results.txt', sep = '\t', header = T)
+# add isolate names to kleborate output
+fixed.id<-sub('Rush_KPC_','',kleborate.df$strain)
+kleborate.df$isolate.id<-sub('_.*','',fixed.id)
+
+# meds file
+meds.df<-read.xlsx('../../data/meta_data/2018-07-17_KPCLTACH_C_Meds.xlsx')
+# antibiotic dictionary
+abx.dict<-read.xlsx('../../data/meta_data/medscateg_SMB2subset.xlsx')
+
+
+# Panisa output table
+
+IS.finder.df<-read.csv('../2020-04-22_PanISa_insertion_seq_search/2020-04-23_panisa_LTACH_C/results/isfinder_combined.txt', sep='\t', header=T)
+# format the sample names
+IS.finder.df$isolate.id<-sub('Rush_KPC_','', IS.finder.df$Sample)
+IS.finder.df$isolate.id<-sub('_aln.*','', IS.finder.df$isolate.id)
+IS.finder.df$isolate.id<-sub('_.*','', IS.finder.df$isolate.id)
+
+
+PanIsa.df<-read.csv('../2020-04-22_PanISa_insertion_seq_search/2020-04-23_panisa_LTACH_C/results/panisa_combined.txt', sep='\t', header=T)
+
+
+
+```
+
+# reference genome gff files for identifying positions of insertions
+
+```{r}
+
+st.13.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_7_GCA_002951635/GCA_002951635.gff'
+
+st.14.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_4_GCF_001521895/GCF_001521895.gff'
+
+st.15.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_3_GCF_001663195/GCF_001663195.gff'
+
+st.16.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_1_GCA_900323945/GCA_900323945.gff'
+
+#st.20.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_6_Rush_KPC_162/Rush_KPC_162.gff'
+
+st.258.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_2_KPNIH1/KPNIH1.gff'
+
+#st.327.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_8_Rush_KPC_418/Rush_KPC_418.gff'
+
+#st.874.gff.file<-'../../../../bin_group/variant_calling_bin/reference/KPC_LTACH_clusters/cluster_10_Rush_KPC_790/Rush_KPC_790.gff'
+
+
+
+# generate list that includes all alignment files
+
+all.gff.file.list<-list(st.13.gff.file, st.14.gff.file, st.15.gff.file,
+st.16.gff.file, #st.20.gff.file,
+st.258.gff.file) #, st.327.gff.file)
+#st.874.gff.file)
+
+names(all.gff.file.list)<-c('st.13.gff.file', 'st.14.gff.file', 'st.15.gff.file',
+'st.16.gff.file', 
+'st.258.gff.file') #'st.327.gff.file', #'st.20.gff.file',
+#'st.874.gff.file'
+
+
+# read in all reference gff files
+
+all.gff.list<-lapply(names(all.gff.file.list), FUN=function(ref.gff){
+  current.gff<-read.gff(all.gff.file.list[[ref.gff]])
+  print(ref.gff)
+  return(current.gff)
+}) # end lapply
+names(all.gff.list)<-names(all.gff.file.list)
+
+
+```
+
+
+## Format LTACH C data for analyses:
+-bed traces for LTACH, floor and room locations
+-culture.dates.df: lookup for all isolates including patient, MLST, culture date, if its an index isolate...
+-overlap.dfs: matrix including isolate x isolate overlap for patients between last negative date for a donor isolate (row) and the first positive date for recipient (col)
+-alignment lists for each MLST  
+
+
+
+#### Make bed trace
+-includes all patients in lookup files, NOT subset on patietns with sequened isolates at this step
+  
+```{r}
+# generate room lookup
+floor.region.key<-GenerateFloorRegionKey(trace.file = trace.file, room.lookup = room.lookup)
+
+# one room missing a ward, because I cant find it on the blueprints
+floor.region.key$ward[floor.region.key$raw_room == '161']<-'A' # arbitrarily putting this room in 1A because we dont know where it goes
+floor.region.key$floor_ward_link[floor.region.key$raw_room == '161']<-'1A'
+
+# make bed trace files from surveillance data
+# returns named list containing trace files at each location level
+trace.list<-MakeTraceFiles(floor.key = floor.region.key, surv.file = surv.file, trace.file = trace.file)
+
+```
+
+#### Generate cluster data list and alinment summary plots for single reference (KPNIH1) alignment
+-full dataset of everything sequenced in a single alignment  
+-used for:  
+-summarizing patients/samples with missing data  
+-plot heatmap of pairwise snp distance  
+-plot variants in each genome  
+-plot variants across alignment   
+-create list with all data subset for patients/isolates in the study and formatted for downstream use for cluster identification and evaluation  
+-subsets patient trace in cluster.data.list for patients with isolates sequenced in the study  
+
+```{r}
+cluster.data.list<-ReadClusterDataFiles(aln.file=dna.file,
+                 facility.mat = trace.list$facility.trace,
+                    floor.mat = trace.list$floor.trace,
+                     ward.mat = trace.list$ward.trace, 
+                     room.mat = trace.list$room.trace, 
+                  sample.file = sample.file, 
+                    MLST.file = MLST.file,
+                     vcf.file = vcf.file,
+                       prefix = prefix.char.genome)
+```
+
+#### Generate lookup table with isolate, isolate type, last negative day (by isolate), MLST, and patient type
+-used to indicate acquisiton and transmission time for each isolate. 
+-data frame with:  
+  -link between isolates & patients  
+  -first positive date for isolate (culture date)  
+  -last negative date for isolate (last surveillance date before isolate was collected-- for acquisition time)  
+  - index isolates are first isolates from patients that were collected <= 3 days (HAI.def set above) of EVER being in the facility.
+  subsequent isolates from these patients collected later are NOT index isolates.
+  -MLST of isolates  
+-remove isolates with missing culture dates for the analysis  
+```{r}
+
+culture.dates.df<-IsolatePtCultureDateLookup(sample.file = sample.file,
+                                        cluster.data.list = cluster.data.list,
+                                        prefix = 'LTACH_C',
+                                         hai.def = 3)
+
+
+
+  print('removing isolates with missing cuture dates from the analysis')
+  print('isolate removed: ')
+  culture.dates.df$isolate.id[is.na(culture.dates.df$culture.date)]
+  
+  culture.dates.df<-culture.dates.df[!(is.na(culture.dates.df$culture.date)),]
+  
+  # removing isolates that are not included in alignments
+  culture.dates.df<-culture.dates.df[!(culture.dates.df$isolate.id %in% c(788, 216)),]
+
+  
+```
+#### Make table for SRA
+```{r}
+sra.df<-culture.dates.df[,c("patient.id","isolate.id","culture.date")]
+write.xlsx(sra.df,file = "../../../../../2020-10-25_transmission_cluster_SRA.xlsx")
+
+```
+
+
+#### Read in and format census data based on isolates in the study  
+-indicates patients and carriers in the facility during the study based on culture dates  
+-indicates prevalence on each day  
+
+
+```{r}
+
+census.df<-ReadCensusFile(census.file = census.file, culture.dates.df = culture.dates.df)
+
+```
+
+
+####  Assign MLSTs to isolates with NOVEL or ND MLST assigned
+-if isolates are assigned ND or Novel, find MLST withing 100 SNV and assign it  
+-if no MSLT is within 100 SNV in the single ref alignment, assign NA  
+-Assign in culture.dates.df if MLST within 100 SNV in single ref alignment  
+
+```{r}
+# MLST of closest relatives of unknown MLST isolates
+MLST.id.unknowns<-sapply(culture.dates.df$isolate.id[culture.dates.df$mlst %in% c('ND','Novel')], FUN=function(unkn){
+  
+  #MLST of relative within 100 SNVs
+  close.relatives<-names(cluster.data.list$snp.dist[,unkn][cluster.data.list$snp.dist[,unkn] <=100])
+  close.relative.mlst<-unique(cluster.data.list$MLST[names(cluster.data.list$MLST) %in% close.relatives ])
+  close.relative.mlst<-unique(cluster.data.list$MLST[names(cluster.data.list$MLST) %in% close.relatives ])
+  
+  if(length(close.relative.mlst >= 1)){
+    
+    return(setdiff(close.relative.mlst, c('ND', 'Novel'))[1])
+    
+  } else {
+
+    return(NA)
+    
+  } # end else
+  
+})
+
+print('Isolates wtih unknown MLST within 100 SNV of isolate with MLST changed to MLST')
+print(MLST.id.unknowns)
+
+# Manually fix the MLSTS that were assigned ND or NOVEL
+culture.dates.df$mlst[culture.dates.df$isolate.id %in% names(MLST.id.unknowns)[MLST.id.unknowns == '258']]<-'258'
+culture.dates.df$mlst[culture.dates.df$isolate.id %in% names(MLST.id.unknowns)[MLST.id.unknowns == '16']]<-'16'
+culture.dates.df$mlst[culture.dates.df$isolate.id %in% names(MLST.id.unknowns)[MLST.id.unknowns == '834']]<-'834'
+
+
+```
+
+##### Summarize any patients to keep track of:
+-Patient 99 has a MLST 16 isolate with no date and a 258 isolate with a date and a 16 isoalte with a date.
+-Patient 238: does not have isolates with in 100 SNV of another isolate, (isolates 168 & 216 are within 6 SNV of each other but are > 5500 SNV from closest isolates therefore keep them as NA. They are not included in transmission cluster analyses since they are from the same patient.   
+
+-patient 99 needs an index/convert assignment
+```{r}
+culture.dates.df$is.index.pt[culture.dates.df$patient.id == '99']<-TRUE
+```
+
+
+##### Summarize number of patients per MLST
+-total patients with isoaltes from each MLST  
+-patients with acquisition (non imported or study start) isolates from each MLST  
+
+
+```{r}
+# summarize number of patients per MLST
+patients.per.mlst<-sort(sapply(unique(culture.dates.df$mlst), FUN=function(x){return(length(unique(culture.dates.df$patient.id[culture.dates.df$mlst == x])))}))
+print('patients per MLST: ')
+print(patients.per.mlst)
+
+# convert isolates from patients per MLST
+convert.patients.per.mlst<-sort(sapply(unique(culture.dates.df$mlst), FUN=function(x){return(length(unique(culture.dates.df$patient.id[culture.dates.df$mlst == x & culture.dates.df$index.isolate== FALSE])))}))
+print('patients with convert isolates from each MLST: ')
+print(convert.patients.per.mlst)
+
+```
+
+
+#### Read in MLST specific reference, gubbins filtered alignments: MLSTs with >1 patient and >=1 convert  & Generate distance matrices and rooted trees and subtrees for each MLST-specific alignment including outgroups, drop problem poor sequencing quality samples based on sequencing QC  
+13 (cluster 7)  
+14 (cluster 4) 
+15 (cluster 3)
+16 (cluster 1) 
+20 (cluster 6)  
+258 (cluster 2) 
+327 (cluster 8)  I think these are wrong and are actually ST 13????
+874 (cluster 10)   
+
+-alignments including distant outgroup for rooting  
+-Alignment used: '...noncore_plus_core_variants_aln.fa'  
+
+```{r}
+
+st.13.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_7_GCA_002951635.1/2020_02_08_08_39_54_core_results/gubbins/2020_02_08_08_39_54_GCA_002951635_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+
+st.14.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_4_GCF_001521895.1/2020_02_08_18_56_12_core_results/gubbins/2020_02_08_18_56_12_GCF_001521895_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.15.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_3_GCF_001663195.1/2020_02_08_08_31_26_core_results/gubbins/2020_02_08_08_31_26_GCF_001663195_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.16.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_1_GCA_900323945.1/2020_02_09_08_22_01_core_results/gubbins/2020_02_09_08_22_01_GCA_900323945_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.20.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_6_Rush_KPC_162/2020_02_09_08_13_37_core_results/gubbins/2020_02_09_08_13_37_Rush_KPC_162_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.258.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_2_KPNIH1/2020_01_23_09_48_40_core_results/gubbins/2020_01_23_09_48_40_KPNIH1_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.327.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_8_Rush_KPC_418/2020_02_09_22_31_33_core_results/gubbins/2020_02_09_22_31_33_Rush_KPC_418_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+st.874.aln.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_10_Rush_KPC_790/2020_02_03_10_39_05_core_results/gubbins/2019_11_20_10_39_05_Rush_KPC_790_genome_aln_w_alt_allele_unmapped.filtered_polymorphic_sites.fasta'
+
+
+
+# generate list that includes all alignment files
+
+all.align.list<-list(st.13.aln.file,
+                     st.14.aln.file,
+                     st.15.aln.file,
+                     st.16.aln.file,
+                     st.20.aln.file,
+                     st.258.aln.file,
+                     #st.327.aln.file,
+                     st.874.aln.file)
+
+names(all.align.list)<-c('st.13.aln.file',
+                     'st.14.aln.file',
+                     'st.15.aln.file',
+                     'st.16.aln.file',
+                     'st.20.aln.file',
+                     'st.258.aln.file',
+                     #'st.327.aln.file',
+                     'st.874.aln.file')
+
+
+# define problem genome vector for samples to drop
+# From Evan 2/23/2020
+#ST258 FILT (18/291) - 556, 42, 462, 131, 104, 261, 189, 327, 138, 342, 151, 534, 523, 519, 24, 315, 785, 176 
+#ST15 FILT (1/19) - 456 
+#ST14 FILT (0/8)  - 
+#ST20 FILT (0/6) - 
+#ST13 FILT (6/76) - 40, 786, 15, 783, 581, 337 
+#ST327 FILT (0/10) - 
+#ST874 FILT (2/11) - 214, 531
+
+problem.genomes<-c("556","42","462","131","104","261","189","327","138","342","151","534","523","519","24","315","785","176", # st258
+                   "456", # st 15
+                   "40", "786", "15", "783", "581", "337", # st 13
+                   "214", "531") # st 874
+
+
+
+# list for each MLST: rooted tree, subtrees,  dist.mat:
+all.mlst.align.lists<-OutGroupDistmatTrees(alignment.file.list = all.align.list,culture.dates.df = culture.dates.df, problem.genomes=problem.genomes)
+
+
+# fix st 13 alignment because it includes sT327 isolates that should not be there
+#2/26/2020
+all.mlst.align.lists$st.13.aln.file<-OutGroupAlignList(dna.file = st.13.aln.file, culture.dates.df = culture.dates.df, outgroup = NA,problem.genomes = c('141',  '16', '418', '419',  '48', '655'))
+
+```
+
+#### Calculate table with distance between all isolates in the study:
+-NA 9999= different MLSTs
+--1 = missing from an alignment
+-value = distance in MLST specific alignment list
+
+
+
+```{r}
+
+all.isolates.dist.mat<-IsolateByIsolateDistance(culture.dates.df = culture.dates.df, all.mlst.align.lists = all.mlst.align.lists)
+
+```
+
+
+#### Calculate table with shared core-genome variants between all isolates in the study:
+- -1: missing isolate from alignment
+- -2: different MLST
+-  N: number of shared variants between the isolates 
+
+```{r}
+
+
+all.isolates.sv.mat.core<-IsolateSharedVarMat(culture.dates.df = culture.dates.df, all.mlst.align.lists = all.mlst.align.lists, core.var=TRUE)
+
+
+all.isolates.sv.mat.all<-IsolateSharedVarMat(culture.dates.df = culture.dates.df, all.mlst.align.lists = all.mlst.align.lists, core.var=FALSE)
+
+```
+
+
+#### Calculate table with all overlaps between all patients in the study by isolate culture date: spatiotemporal
+-for all pairwise comparisons of isolates:  
+-NA= same patient comparison  
+-0 =no room overlap between last negative of donor isolate and culture date of recipient isolate
+-N = number of days overlapping during which row patient could have transmitted to column patient  
+Locations:  
+-Facility  
+-Floor  
+-Room  
+__time frame is based on last negative date for donor patient isolate and the culture date of the recipeint isolate__
+-The timeframe does not consider when the recipient was last negative for the isolate
+
+
+```{r}
+
+facility.overlap<-IsolateByIsolateOverlap(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$facility.trace, type='facility')
+
+floor.overlap<-IsolateByIsolateOverlap(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$floor.trace)
+
+room.overlap<-IsolateByIsolateOverlap(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$room.trace)
+
+```
+
+
+#### Calculate table with all overlaps between all patients in the study by isolate culture date: sequential
+-The timeframe does not consider when the recipient was last negative for the isolate, this is the most conservative
+-the overlap is always between when a donor was last negative for the isolate and the recipient first positive
+-this gives the largest range of potential exposure time
+
+
+```{r}
+
+facility.overlap.sequential<-suppressWarnings(IsolateByIsolateOverlapSequential(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$facility.trace, type='facility'))
+
+floor.overlap.sequential<-suppressWarnings(IsolateByIsolateOverlapSequential(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$floor.trace, type='not_facility'))
+
+room.overlap.sequential<-suppressWarnings(IsolateByIsolateOverlapSequential(culture.dates.df = culture.dates.df, trace.mat = cluster.data.list$room.trace))
+
+
+```
+
+
+# Analyses for Transmission Cluster manuscript:
+
+
+#### Calculate max within patient within MLST diversity for reasonable distance for assigning index isolates to converts
+
+-Note: INF reported for intra-patient distance:
+
+patient 27 isolates are MLST 834 and are distance of 9999 and patient 128's isolates are missing from alignments and are MLST 950.  
+
+
+
+```{r}
+# isolates collected per each patient
+isolates.per.patient<-sapply(unique(culture.dates.df$patient.id), FUN=function(pt){
+  length(culture.dates.df$isolate.id[culture.dates.df$patient.id == pt])
+})
+
+names(isolates.per.patient)<-unique(culture.dates.df$patient.id)
+pts.with.multiple.isolates<-isolates.per.patient[isolates.per.patient>1]
+
+# max within patient distance for isolates from the same patient that are the same MLST
+max.within.pt.dist<-sapply(names(pts.with.multiple.isolates), FUN=function(pts){
+  
+  current.pt.df<-culture.dates.df[culture.dates.df$patient.id == pts, ]
+  
+  current.dist<-all.isolates.dist.mat[as.character(current.pt.df$isolate.id),as.character(current.pt.df$isolate.id)]
+  
+  # largest distance < 9999 which is same MLST and not missing
+
+  max(c(current.dist)[c(current.dist)<9999 & c(current.dist) >-1])
+  
+})
+
+print('Summary of max within patient within MLST idstance: ')
+print(summary(max.within.pt.dist[!(is.infinite(max.within.pt.dist))]))
+
+```
+
+
+#### Identify transmission clusters with tree based shared variant method
+-make list of all MLSTS containing named vectors of isolateIDs naming clusters 
+
+```{r}
+
+# transmission clsuters for all MLSTS
+all.mlst.sv.clusters<-TnClustersMSVSVstIndexFirstAllMLST(all.mlst.align.lists = all.mlst.align.lists,
+                                       culture.dates.df = culture.dates.df,
+                                  all.isolates.dist.mat = all.isolates.dist.mat,
+                               all.isolates.sv.mat.core = all.isolates.sv.mat.core)
+
+
+
+```
+
+
+#### Add cluster IDs to lookup table so they are linked to isolates and patient information
+
+
+```{r}
+# generate df for plotting with ggplot
+# isolate, patient, cluster id, mlst, type of patient
+
+unlist.clusters<-unlist(all.mlst.sv.clusters)
+
+# isolate ID in same order as unlisted clusters 
+culture.isolate.id<-gsub("^.*\\.",'', names(unlist.clusters))
+
+
+# add cluster ID to lookup table
+culture.dates.df$cluster.id<-sapply(culture.dates.df$isolate.id, FUN=function(iso){
+  
+  
+  if(iso %in% culture.isolate.id){
+    
+    as.vector(unlist.clusters[culture.isolate.id == iso])
+    
+  } else { # if the isolate is not in a cluster
+    NA
+  }
+  
+})
+
+
+
+
+# add cluster id to df
+culture.dates.df$mlst_clust<-paste(culture.dates.df$mlst, culture.dates.df$cluster.id,sep='_')
+
+
+```
+
+
+#### Calculate mutation types across isolates in clusters
+-evidence of hyper mutator
+-this is for all groups of isoaltes that are in the clusters list escept cluster 1
+- this not subset for real clusters: e.g. >1 patient >=1 convert, just all groups of isolates
+- rownames in each DF are the clsuter ID for within each MLST
+
+
+
+
+```{r}
+# mutation frequencies
+mutator.df.list<-CGRatesAllAligns(all.mlst.align.lists = all.mlst.align.lists,
+                                 all.isolates.dist.mat = all.isolates.dist.mat,
+                                         clusters.list = all.mlst.sv.clusters)
+names(mutator.df.list)<-names(all.mlst.align.lists)
+
+```
+
+-mutation type counts for conducting statistical tests
+
+```{r}
+# mutation type counts
+mutator.df.list.counts<-CGCountsAllAligns(all.mlst.align.lists = all.mlst.align.lists,
+                                 all.isolates.dist.mat = all.isolates.dist.mat,
+                                         clusters.list = all.mlst.sv.clusters)
+names(mutator.df.list.counts)<-names(all.mlst.align.lists)
+
+```
+
+- Multinomial test for differences in mutation biases
+
+```{r}
+# #multinomial.test(observed, prob, useChisq = FALSE, MonteCarlo = FALSE, ntrial = 100000, atOnce = 1000000)
+#
+# # ST 16 16 cluster with huge diversity and looks like elevated GCAT transition
+ obs.counts<-as.vector(unlist(mutator.df.list.counts$st.16.aln.file["16",2:ncol(mutator.df.list.counts$st.16.aln.file)]))
+
+ probs<-as.vector(unlist(mutator.df.list$st.16.aln.file["Population frequency",2:ncol(mutator.df.list$st.16.aln.file)]))
+
+ ST_16_16_multinomial<-multinomial.test(observed=obs.counts, prob=probs, MonteCarlo = FALSE, ntrial = 1000000, atOnce = 1000000)
+#
+#
+# # ST 258 117 cluster with huge diversity and looks like elevated GCAT transition
+ obs.counts<-as.vector(unlist(mutator.df.list.counts$st.258.aln.file["117",2:ncol(mutator.df.list.counts$st.258.aln.file)]))
+ probs<-as.vector(unlist(mutator.df.list$st.258.aln.file["Population frequency",2:ncol(mutator.df.list$st.258.aln.file)]))
+#
+ST_258_117_multinomial<-multinomial.test(observed=obs.counts, prob=probs, MonteCarlo = FALSE, ntrial = 1000000, atOnce = 1000000)
+
+```
+
+
+#### Look for MutR or MutS mutations
+-evaluate if mutations in MMR machinery can be identified in mutator genomes from SNP matrix
+- identify if there is evidence of insertions from PanIsa in MMR genes from PanIsa output
+```{r}
+
+# SNP matrix info for mutational analysis
+# read in SNP matrices
+
+st.13.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_7_GCA_002951635.1/2020_02_08_08_39_54_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+
+st.14.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_4_GCF_001521895.1/2020_02_08_18_56_12_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.15.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_3_GCF_001663195.1/2020_02_08_08_31_26_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.16.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_1_GCA_900323945.1/2020_02_09_08_22_01_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.20.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_6_Rush_KPC_162/2020_02_09_08_13_37_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.258.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_2_KPNIH1/2020_01_23_09_48_40_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.327.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_8_Rush_KPC_418/2020_02_09_22_31_33_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+st.874.SNP.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_10_Rush_KPC_790/2020_02_03_10_39_05_core_results/data_matrix/matrices/SNP_matrix_allele_new.tsv'
+
+# make list of SNP matrices files
+SNP.mat.list.files<-list(st.13.SNP.mat.file,  st.14.SNP.mat.file,  st.15.SNP.mat.file,  st.16.SNP.mat.file, st.20.SNP.mat.file,
+                         st.258.SNP.mat.file, st.874.SNP.mat.file)
+
+names(SNP.mat.list.files)<-names(mutator.df.list.counts)
+
+# read in all of the SNP matrices
+SNP.mat.list<-lapply(SNP.mat.list.files, FUN=function(x){
+  print(x)
+  snp.mat<-read.csv(x,sep='\t', header = T)
+  return(snp.mat)
+})
+
+
+#### Indel matrix
+# read in the indel matrices
+st.13.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_7_GCA_002951635.1/2020_02_08_08_39_54_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+
+st.14.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_4_GCF_001521895.1/2020_02_08_18_56_12_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.15.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_3_GCF_001663195.1/2020_02_08_08_31_26_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.16.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_1_GCA_900323945.1/2020_02_09_08_22_01_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.20.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_6_Rush_KPC_162/2020_02_09_08_13_37_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.258.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_2_KPNIH1/2020_01_23_09_48_40_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.327.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_8_Rush_KPC_418/2020_02_09_22_31_33_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+st.874.indel.mat.file<-'../../../Sequence_data/consensus/2019_07_22_KPC_LTACH_variant_calling_cluster_based_outgroup/cluster_10_Rush_KPC_790/2020_02_03_10_39_05_core_results/data_matrix/matrices/Indel_matrix_allele.tsv'
+
+# make list of indel matrices files
+indel.mat.list.files<-list(st.13.indel.mat.file,  st.14.indel.mat.file,  st.15.indel.mat.file,  st.16.indel.mat.file, st.20.indel.mat.file,
+                         st.258.indel.mat.file, st.874.indel.mat.file)
+
+names(indel.mat.list.files)<-names(mutator.df.list.counts)
+
+# read in all of the indel matrices
+indel.mat.list<-lapply(indel.mat.list.files, FUN=function(x){
+  print(x)
+  indel.mat<-read.csv(x,sep='\t', header = T)
+  return(indel.mat)
+})
+
+
+
+```
+
+
+#### Generate list of presence absence dfs for each MLST indiciating moderate or high repair mutations SNP
+-one df list entry per MLST
+
+
+```{r}
+# list with df of presence absence of moderate or high impact dna repair mutations for each MLST
+
+mut.pres.abs.list<-lapply(names(SNP.mat.list), FUN=function(mlst.mat){
+  
+# current alignment SNP matrix
+mlst.snp.mat<-SNP.mat.list[[mlst.mat]]
+
+# subset all genes with 'repair' annotations and moderate or high impact
+mlst.snp.mat<-mlst.snp.mat[grepl('DNA mismatch',mlst.snp.mat[,1],ignore.case = T) & (grepl('HIGH',mlst.snp.mat[,1],ignore.case = T) | grepl('MODERATE',mlst.snp.mat[,1],ignore.case = T)) ,]
+
+#mlst.snp.mat<-mlst.snp.mat[grepl('mi',mlst.snp.mat[,1],ignore.case = T) ,]
+
+
+# check if there are valid mutations for the MLST
+print(mlst.mat)
+print(dim(mlst.snp.mat))
+if(dim(mlst.snp.mat)[1] == 0){
+  return(NA)
+} else {
+    
+# make indicator of mutation allele
+allele<-mlst.snp.mat[,1]
+allele<-sub('.*>','',allele)
+allele<-substr(allele,1,1)
+
+# find which genomes (cols after col 1) have the mutation
+#list of length nrow (mutations) mlst.snp.mat indicating T/F mutation presence absense for each col (genome)
+is.mut.allele<-lapply(1:length(allele),FUN=function(x){
+  mlst.snp.mat[x, 2:ncol(mlst.snp.mat)] == allele[x]
+})
+
+# make list into matrix indicating presence/absence
+pres.abs.df<-do.call(rbind, lapply(is.mut.allele, as.data.frame))
+# add name of mutation to presence/absence SNP matrix
+# make shorter rownames so easier to read
+rownames(pres.abs.df)<-sub('.*Strand Information:','',mlst.snp.mat[,1])
+
+# return presence absence matrix
+return(pres.abs.df)
+} # end else
+
+
+}) # end lapply
+
+names(mut.pres.abs.list)<-names(SNP.mat.list)
+
+```
+
+#### Generate list of presence absence dfs for each MLST indiciating moderate or high repair mutations INDELS
+-one df list entry per MLST
+
+```{r}
+# list with df of presence absence of moderate or high impact dna repair mutations for each MLST
+
+indel.pres.abs.list<-lapply(names(indel.mat.list), FUN=function(mlst.mat){
+  
+# current alignment indel matrix
+mlst.indel.mat<-indel.mat.list[[mlst.mat]]
+
+# subset all genes with 'repair' annotations and moderate or high impact
+mlst.indel.mat<-mlst.indel.mat[grepl('recombination',mlst.indel.mat[,1],ignore.case = T) | grepl('mutr',mlst.indel.mat[,1],ignore.case = T) | grepl('mismatch',mlst.indel.mat[,1],ignore.case = T),] 
+# check if there are valid mutations for the MLST
+print(mlst.mat)
+print(dim(mlst.indel.mat))
+if(dim(mlst.indel.mat)[1] == 0){
+  return(NA)
+} else {
+    
+# make indicator of mutation allele
+allele<-mlst.indel.mat[,1]
+allele<-sub('.*>','',allele)
+allele<-substr(allele,1,1)
+
+# find which genomes (cols after col 1) have the mutation
+#list of length nrow (mutations) mlst.indel.mat indicating T/F mutation presence absense for each col (genome)
+is.mut.allele<-lapply(1:length(allele),FUN=function(x){
+  mlst.indel.mat[x, 2:ncol(mlst.indel.mat)] == allele[x]
+})
+
+# make list into matrix indicating presence/absence
+pres.abs.df<-do.call(rbind, lapply(is.mut.allele, as.data.frame))
+# add name of mutation to presence/absence indel matrix
+# make shorter rownames so easier to read
+rownames(pres.abs.df)<-sub('.*Strand Information:','',mlst.indel.mat[,1])
+
+# return presence absence matrix
+return(pres.abs.df)
+} # end else
+
+
+}) # end lapply
+
+names(indel.pres.abs.list)<-names(indel.mat.list)
+
+```
+
+#### Examine large insertions in MMR genes
+-only MLSTs with clusters identified: MLST 13, 15, 16, 258
+-examine PanIsa results
+-search 'mismatch' in genbank for each reference to identify mmr gene positions
+-for each MLST alignment, find if there are insertions at these corresponding positions
+
+```{r}
+
+# st258
+st.258.mmr.gff<-all.gff.list$st.258.gff.file[grep('mismatch',all.gff.list$st.258.gff.file$attributes, ignore.case=T),]
+st.258.mmr.gff$geneID<-sub('.*product','',st.258.mmr.gff$attributes)
+st.258.mmr.gff$geneID<-sub(';.*','',st.258.mmr.gff$geneID)
+st.258.mmr.gff$mlst<-258
+
+# st 13
+st.13.mmr.gff<-all.gff.list$st.13.gff.file[grep('mismatch',all.gff.list$st.13.gff.file$attributes, ignore.case=T),]
+st.13.mmr.gff$geneID<-sub('.*product','',st.13.mmr.gff$attributes)
+st.13.mmr.gff$geneID<-sub(';.*','',st.13.mmr.gff$geneID)
+st.13.mmr.gff$mlst<-13
+
+# st 15
+st.15.mmr.gff<-all.gff.list$st.15.gff.file[grep('mismatch',all.gff.list$st.15.gff.file$attributes, ignore.case=T),]
+st.15.mmr.gff$geneID<-sub('.*product','',st.15.mmr.gff$attributes)
+st.15.mmr.gff$geneID<-sub(';.*','',st.15.mmr.gff$geneID)
+st.15.mmr.gff$mlst<-15
+
+# st 16
+st.16.mmr.gff<-all.gff.list$st.16.gff.file[grep('mismatch',all.gff.list$st.16.gff.file$attributes, ignore.case=T),]
+st.16.mmr.gff$geneID<-sub('.*product','',st.16.mmr.gff$attributes)
+st.16.mmr.gff$geneID<-sub(';.*','',st.16.mmr.gff$geneID)
+st.16.mmr.gff$mlst<-16
+
+# make a single table because it is easier to search
+clust.mlst.mmr.gff.df<-rbind(st.13.mmr.gff, st.15.mmr.gff, st.16.mmr.gff, st.258.mmr.gff)
+
+```
+
+### MMR IS finder results: 
+
+```{r}
+
+# subset ISfinder results for isolates with insertions in the MMR gene locations
+
+# for each unique isolate in culture.dates.df
+mmr.insertion.by.isolate<-lapply(unique(culture.dates.df$isolate.id[culture.dates.df$mlst %in% unique(clust.mlst.mmr.gff.df$mlst)]), FUN=function(current.isolate){
+  
+  # identify if there are any insertions from IS finder df
+  if(nrow(IS.finder.df[IS.finder.df$isolate.id == current.isolate,]) <= 0){
+    
+    return('no insertion') # if no insertions (return 'NA') else
+    
+  } else {
+    
+     # find current mlst
+        current.mlst<-as.vector(culture.dates.df$mlst[culture.dates.df$isolate.id == current.isolate])
+        
+    # subset the IS.finder df for the isolate
+        IS.sub<-IS.finder.df[IS.finder.df$isolate.id == current.isolate, ]
+        
+    # subset mmr gff for positions for the current mlst
+        mlst.mmr.sub<-clust.mlst.mmr.gff.df[clust.mlst.mmr.gff.df$mlst ==current.mlst, ] 
+        
+    # for each mmr gene
+        
+    mmr.mlst.insertions<-sapply(1:nrow(mlst.mmr.sub),FUN=function(insertion.pos){
+      
+      # for each mmr gene get the location range
+      current.mmr.gene.pos<-mlst.mmr.sub$start[insertion.pos]:mlst.mmr.sub$end[insertion.pos]
+      
+        #find out if any insertions are in the mmr gene
+        sum(IS.sub$Start_Position %in% current.mmr.gene.pos | IS.sub$Stop_Position %in% current.mmr.gene.pos)
+      
+    }) # end sapply each mmr gene for the mlst
+    names(mmr.mlst.insertions)<-mlst.mmr.sub$geneID
+    
+           
+    # return vector named by mmr genes indicating T/F for if there is an insertion in the gene for the isolate
+    return(mmr.mlst.insertions[mmr.mlst.insertions >0])
+    
+  } # end else
+  
+}) # end lapply each isolate
+
+names(mmr.insertion.by.isolate)<-unique(culture.dates.df$isolate.id[culture.dates.df$mlst %in% unique(clust.mlst.mmr.gff.df$mlst)])
+
+```
+
+
+
+#### Calculate Max pairwise SNV distances for each cluster: All isolates in cluster
+-to use for generating box-plots and addint to final look-up table
+-returns list of length(isolates.id), with 3 SNV distance summaries:
+1. any isolate  
+2. isolate from same patient (if there is one)  
+3. isolate from different patient   
+-if isolate is not in a cluster NA is returned
+
+```{r}
+# max distance to any isolate in cluster
+culture.dates.df$max.in.clust.dist<-IsolateClustDistSummary(culture.dates.df = culture.dates.df, all.isolates.dist.mat = all.isolates.dist.mat, dist.type='max.all')
+
+# max distance to isolate from the same patient in the same cluster
+culture.dates.df$max.intra.pt.clust<-IsolateClustDistSummary(culture.dates.df = culture.dates.df, all.isolates.dist.mat = all.isolates.dist.mat, dist.type='max.same.pt')
+
+# max distance to isolate from different patient in the same cluster
+culture.dates.df$max.dif.pt.clust<-IsolateClustDistSummary(culture.dates.df = culture.dates.df, all.isolates.dist.mat = all.isolates.dist.mat, dist.type='max.dif.pt')
+
+```
+
+
+
+## Figures and data for transmission cluster manuscript
+__08-27-20__
+#### Summarize total isoaltes, converts and index patients and isolates in the study
+
+```{r}
+print('total isolates')
+length(unique(culture.dates.df$isolate.id))
+print('study start isolates')
+length(unique(culture.dates.df$isolate.id[culture.dates.df$study.start.index.isolate==TRUE]))
+print('importation isolates')
+length(unique(culture.dates.df$isolate.id[culture.dates.df$importation.index.isolate==TRUE]))
+print('convert isolates')
+length(unique(culture.dates.df$isolate.id[culture.dates.df$study.start.index.isolate==FALSE & culture.dates.df$importation.index.isolate==FALSE ]))
+
+
+print('total patients' )
+length(unique(culture.dates.df$patient.id))
+
+print('study start index patients')
+length(unique(culture.dates.df$patient.id[culture.dates.df$study.start.index.isolate==TRUE]))
+
+print('importation index patients')
+length(unique(culture.dates.df$patient.id[culture.dates.df$importation.index.isolate==TRUE]))
+
+print('convert patients index or convert')
+length(unique(culture.dates.df$patient.id[culture.dates.df$study.start.index.isolate==FALSE & culture.dates.df$importation.index.isolate==FALSE ]))
+
+print('True convert patients only convert')
+length(unique(culture.dates.df$patient.id[culture.dates.df$study.start.index.isolate==FALSE & culture.dates.df$importation.index.isolate==FALSE & culture.dates.df$is.index.pt==FALSE]))
+
+print('True convert isolates only convert')
+length(unique(culture.dates.df$isolate.id[culture.dates.df$study.start.index.isolate==FALSE & culture.dates.df$importation.index.isolate==FALSE & culture.dates.df$is.index.pt==FALSE]))
+
+
+
+# isolates from MLSTs represented among at lest 2 patients
+
+length(unique(culture.dates.df$isolate.id[culture.dates.df$mlst %in% c('13','14','15','16','20','258','874')]))
+       
+       
+```
+
+
+#### 1. Extensive importation and acquisition of KPC-Kp occurred during the one-year intervention study  
+
+Figure 1: A. summary of prevalence of KPC-Kp and new cases by MLST 258 vs other MLSTs over time  
+
+```{r}
+# Figure 1 A
+
+culture.dates.df.plotting<-MLSTEpiCurveFmtdf(fx.culture.dates.df =culture.dates.df,
+                                            sampling.interval = 14)
+
+# remove inf days if culture dates were missing
+culture.dates.df.plotting<-culture.dates.df.plotting[!is.infinite(culture.dates.df.plotting$sampling.interval),]
+
+# make days after the study the last day in the study
+culture.dates.df.plotting$sampling.interval[culture.dates.df.plotting$sampling.interval == max(culture.dates.df.plotting$sampling.interval)]<-max(culture.dates.df.plotting$sampling.interval)-1
+
+# counts by patient type without MLST indicated
+isolate.category.count<-lapply(unique(culture.dates.df.plotting$sampling.interval), FUN=function(sample.interval){
+  
+current.interval.df<-culture.dates.df.plotting[culture.dates.df.plotting$sampling.interval == sample.interval,]
+
+start.sum<-sum(current.interval.df$study.start.index.isolate) # study start index isolate
+import.sum<-sum(current.interval.df$importation.index.isolate) # importation index isolate
+convert.sum<-sum(!(current.interval.df$index.isolate) ) # convert (not study start or import index isolate)
+return(list(start.sum, import.sum, convert.sum))
+}) # end sapply category count
+
+
+# no mlst just isolate count in each category
+barplot(unlist(isolate.category.count), col=c('tan','peachpuff4','lightblue'), main='convert and index isolate count by sampling time', xlab='28 day intervals', ylab='KPC-Kp isolates')
+
+
+# make plot with MLST: move to function after optomized
+culture.dates.plotting.melt<-culture.dates.df.plotting[,c('mlst','sampling.interval')]
+culture.dates.plotting.melt$patient.type<-''
+
+culture.dates.plotting.melt$patient.type[culture.dates.df.plotting$study.start.index.isolate & culture.dates.df.plotting$mlst == 258]<-'ST258 Study start'
+
+culture.dates.plotting.melt$patient.type[culture.dates.df.plotting$importation.index.isolate & culture.dates.df.plotting$mlst == 258]<-'ST258 Importation'
+
+culture.dates.plotting.melt$patient.type[!(culture.dates.df.plotting$index.isolate)& culture.dates.df.plotting$mlst == 258]<-'ST258 Acquisition'
+
+culture.dates.plotting.melt$patient.type[culture.dates.df.plotting$study.start.index.isolate & culture.dates.df.plotting$mlst != 258]<-'Other ST Study start'
+
+culture.dates.plotting.melt$patient.type[culture.dates.df.plotting$importation.index.isolate & culture.dates.df.plotting$mlst != 258]<-'Other ST Importation'
+
+culture.dates.plotting.melt$patient.type[!(culture.dates.df.plotting$index.isolate)& culture.dates.df.plotting$mlst != 258]<-'Other ST Acquisition'
+
+
+
+mdata <- melt(culture.dates.plotting.melt, id=c("mlst","sampling.interval"))
+
+mcast<-t(cast(mdata, value~mlst+sampling.interval,length))
+
+# generate df for plotting:
+fmt.mlst<-as.numeric(sub('_.*','',rownames(mcast)))
+fmt.time<-as.numeric(sub('.*_','',rownames(mcast)))
+
+fmt.convert<-as.numeric(as.vector(mcast[,'ST258 Acquisition']))
+fmt.importation<-as.numeric(as.vector(mcast[,'ST258 Importation']))
+fmt.study.start<-as.numeric(as.vector(mcast[,'ST258 Study start']))
+
+fmt.convert.other<-as.numeric(as.vector(mcast[,'Other ST Acquisition']))
+fmt.importation.other<-as.numeric(as.vector(mcast[,'Other ST Importation']))
+fmt.study.start.other<-as.numeric(as.vector(mcast[,'Other ST Study start']))
+
+time.mlst.count.df<-cbind(fmt.time, fmt.mlst,fmt.study.start, fmt.importation,fmt.convert,
+                          fmt.convert.other,fmt.importation.other,fmt.study.start.other)
+
+time.mlst<-as.vector(rownames(mcast))
+time.mlst.count.df<-as.data.frame(cbind(time.mlst, fmt.study.start, fmt.importation, fmt.convert,fmt.convert.other,fmt.importation.other,fmt.study.start.other))
+
+# melted df with cols for time with mlst, count (called value), time group, 
+mtime.mlst.count.df<-melt(time.mlst.count.df,'time.mlst')
+mtime.mlst.count.df$mlst<-as.factor(as.numeric(sub('_.*','',mtime.mlst.count.df$time.mlst)))
+mtime.mlst.count.df$time.group<-as.numeric(sub('.*_','',mtime.mlst.count.df$time.mlst))
+mtime.mlst.count.df$value<-as.numeric(as.vector(mtime.mlst.count.df$value))
+
+
+mtime.mlst.count.df$variable<-sapply( as.vector(mtime.mlst.count.df$variable),FUN=function(x){
+  if(x == 'fmt.study.start'){
+    
+  'ST258 Study start'  
+  } else {if(x == 'fmt.importation'){
+    
+      'ST258 Importation'
+    
+  } else {if(x == 'fmt.convert'){
+    
+    'ST258 Acquisition'
+    
+  } else {if(x == 'fmt.study.start.other'){
+    
+      'Other ST Study start'
+    }else{if(x == 'fmt.importation.other'){
+      
+        'Other ST Importation'
+      
+      }else{if(x == 'fmt.convert.other'){
+        
+         'Other ST Acquisition'
+        }}}}}}})
+
+
+# remove study start from times aftr 1
+mtime.mlst.count.df$time.group[(mtime.mlst.count.df$variable =='ST258 Study start' | mtime.mlst.count.df$variable =='Other ST Study start') & mtime.mlst.count.df$time.group == 1 ]<-0
+
+mtime.mlst.count.df<-mtime.mlst.count.df[!(mtime.mlst.count.df$value == 0 & (mtime.mlst.count.df$variable=='ST258 Study start' | mtime.mlst.count.df$variable=='Other ST Study start')),]
+
+# plot barplot
+barplot.mlsts<-ggplot(mtime.mlst.count.df, aes(x = variable, y = value, fill = mlst)) + 
+  geom_bar(stat = 'identity', position = 'stack') +
+  facet_grid(~ time.group) +
+theme(panel.background = element_blank(), legend.position='right')+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+guides(fill=guide_legend(title="MLST")) +
+ xlab("Bi-weekly sampling period") +
+  ylab("KPC-Kp isolate count") 
+
+
+# # subset rows to match dates in barplots
+census.day.df.plot<-census.df[!(census.df$day >= max(culture.dates.df.plotting$trace.format.culture.date, na.rm = T)),]
+#
+#
+ census.line.plots<-ggplot(census.day.df.plot, aes(day)) +
+   geom_line(aes(y = census, colour = 'Patients in LTACH')) +
+   geom_line(aes(y = carriers, colour = 'KPC-Kp carriers')) +
+   geom_line(aes(y = prevalence, colour = "% Prevalence")) +
+   scale_color_manual(values=wes_palette(n=3, name="GrandBudapest2"))+
+   scale_x_continuous(name = "", labels = NULL) +
+   scale_y_continuous(name='Patients',limits = c(0,150), sec.axis=dup_axis(name='Prevalence'))+
+   theme_bw() +
+   theme(axis.line = element_line(colour = "black"),
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank(),
+     panel.border = element_blank(),
+     panel.background = element_blank(),legend.position='top',
+     legend.title = element_blank()) +
+   theme(axis.title.y.right = element_text(colour = wes_palette(n=1, name="GrandBudapest2")))
+
+ 
+#### plot just the prevalence line
+ ggplot(census.day.df.plot, aes(day)) +
+   geom_line(aes(y = prevalence, colour = "% Prevalence"), size=1.5) +
+   scale_color_manual(values=wes_palette(n=3, name="GrandBudapest2"))+
+   scale_x_continuous(name = "", labels = NULL) +
+   scale_y_continuous(name='Patients',limits = c(0,100), breaks=seq(0,100,10))+
+   theme_bw() +
+   theme(axis.line = element_line(colour = "black"),
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank(),
+     panel.border = element_blank(),
+     panel.background = element_blank(),legend.position='top',
+     legend.title = element_blank(),
+     axis.text.y = element_text(size=15))
+ 
+ 
+ 
+ 
+# # plot to file
+# file<-paste("figures/", format(Sys.time(), "%Y-%m-%d"),'Fig_1_MLST_Epicurve.pdf')
+# pdf(file)
+# grid.arrange(census.line.plots, barplot.mlsts, ncol=1)
+# dev.off()
+
+# # plot to notebook
+ grid.arrange(census.line.plots, barplot.mlsts, ncol=1)
+
+
+# masking other MLSTs only ST258 and other group
+ mtime.mlst.count.df.masked<-mtime.mlst.count.df
+ mtime.mlst.count.df.masked$mlst.masked<-mtime.mlst.count.df$mlst
+ mtime.mlst.count.df.masked$mlst.masked<-as.vector(mtime.mlst.count.df.masked$mlst.masked)=='258'
+ mtime.mlst.count.df.masked$mlst.masked[mtime.mlst.count.df.masked$mlst.masked>0 & !is.na(mtime.mlst.count.df.masked$mlst.masked)]<-'258'
+  mtime.mlst.count.df.masked$mlst.masked[mtime.mlst.count.df.masked$mlst.masked==FALSE | is.na(mtime.mlst.count.df.masked$mlst.masked)]<-'other'
+  
+  
+ # plot barplot
+barplot.mlsts.masked<-ggplot(mtime.mlst.count.df.masked, aes(x = mlst.masked, y = value, fill = variable)) + 
+  geom_bar(stat = 'identity', position = 'stack') +
+  facet_grid(~ time.group, scales = "free_x", space="free_x") +
+scale_fill_manual(values=c(wes_palette(n=3, name="GrandBudapest2"),
+                           wes_palette(n=2, name="Royal2"),
+                           wes_palette(n=4, name="Chevalier1")[3]))+
+theme(panel.background = element_blank(), legend.position='right')+
+  theme(axis.text.x=element_blank()) +
+guides(fill=guide_legend(title="MLST")) +
+ xlab("sampling period") +
+  ylab("KPC-Kp isolate count")
+ 
+ 
+  census.line.plots.mlst.masked<-ggplot(census.day.df.plot, aes(day)) +
+   geom_line(aes(y = census, colour = 'Patients in LTACH')) +
+   geom_line(aes(y = carriers, colour = 'KPC-Kp carriers')) +
+   geom_line(aes(y = prevalence, colour = "% prevalence")) +
+    scale_colour_manual(values=wes_palette(n=3, name="GrandBudapest2")) +
+   scale_x_continuous(name = "", labels = NULL) +
+   scale_y_continuous(name='Patients')+
+   theme_bw() +
+   theme(axis.line = element_line(colour = "black"),
+         axis.text.x=element_blank(),
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank(),
+     panel.border = element_blank(),
+     panel.background = element_blank(),legend.position='top',
+     legend.title = element_blank()) 
+      
+
+  grid.arrange(census.line.plots, barplot.mlsts.masked, ncol=1)
+
+
+  
+  #### only barplots
+  mtime.mlst.count.df.masked$isolate.type[grepl('Importation',mtime.mlst.count.df.masked$variable)]<-'Importation'
+    mtime.mlst.count.df.masked$isolate.type[grepl('Study start',mtime.mlst.count.df.masked$variable)]<-'Study start'
+      mtime.mlst.count.df.masked$isolate.type[grepl('Acquisition',mtime.mlst.count.df.masked$variable)]<-'Acquisition'
+    
+    
+  ggplot(mtime.mlst.count.df.masked, aes(x = time.group, y = value, fill = isolate.type)) + 
+  geom_bar(stat = 'identity', position = 'stack') +
+  facet_grid(~ time.group, scales = "free_x", space="free_x") +
+scale_fill_manual(values=c('grey','lightblue',wes_palette(n=3, name="GrandBudapest2")))+
+theme(panel.background = element_blank(), legend.position='right',axis.text.y = element_text(size=15))+
+  theme(axis.text.x=element_blank()) +
+guides(fill=guide_legend(title="Surveillance")) +
+ xlab("sampling period") +
+  ylab("KPC-Kp isolate count")+
+    scale_y_continuous(name='Isolates')
+  
+  
+
+
+
+```
+
+
+#### Figure 1AB formatted
+
+
+```{r}
+  
+
+  
+  # prevalence with simplified epi curve
+  #### plot just the prevalence line
+ prevalence_only<-ggplot(census.day.df.plot, aes(day)) +
+   geom_line(aes(y = prevalence, colour = "% Prevalence"), size=1.5) +
+   scale_color_manual(values="black")+
+   scale_x_continuous(name = "", labels = NULL) +
+   scale_y_continuous(name='% of patients',limits = c(0,100), breaks=seq(0,100,10))+
+   theme_bw() +
+   theme(axis.line = element_line(colour = "black"),
+     panel.grid.major = element_blank(),
+     panel.grid.minor = element_blank(),
+     panel.border = element_blank(),
+     panel.background = element_blank(),
+     legend.position='none',
+     legend.title = element_blank(),
+     legend.text=element_text(size=15),
+     axis.text.y = element_text(size=15),
+     axis.text = element_text(size=15),
+     axis.title.y=element_text(size=15))+
+   labs(tag='A')
+ 
+  
+  simple_epi_curve<-ggplot(mtime.mlst.count.df.masked, aes(x = time.group, y = value, fill = isolate.type)) + 
+  geom_bar(stat = 'identity', position = 'stack') +
+  facet_grid(~ time.group, scales = "free_x", space="free_x") +
+scale_fill_manual(values=c('darkgrey','lightblue','lightgrey'))+
+theme(panel.background = element_blank(), legend.position='bottom',   legend.text=element_text(size=15),
+     axis.text.y = element_text(size=15),
+     axis.text = element_text(size=15),
+     axis.title.y=element_text(size=15))+
+  theme(axis.text.x=element_blank(),
+        legend.title = element_blank(), axis.ticks.x=element_blank(),
+        strip.text = element_text(size = 15)) +
+ xlab("Sampling period (14 days)") +
+  ylab("KPC-Kp isolate count (N)")+
+    scale_y_continuous(name='KPC-Kp isolate \n count (N)')+
+    labs(tag='B')
+  
+  
+  
+grid.arrange(prevalence_only, simple_epi_curve, ncol=1)
+
+
+  
+```
+
+
+
+#### Add additional info about clusters to the patient isolate lookup table
+__patient types are based on the isolates that put them into the cluster, so unique convert and unique index may be greater than total unique patients in the cluster.__
+- number of patients in clusters:  clust.pt.count
+- number of convert patients: convert.pt.count
+- number of index patients: index.pt.count
+-cluster category:   cluster.category
+  -highest confidence clusters: 1 index patient who is positive before all converts in the cluster
+  -missing index: convert only clusters  
+  -isolates from >1 index patient
+
+
+```{r}
+
+culture.dates.df.save<-culture.dates.df
+# remove problem isolates from comparisons of distance and make sure they are not in clusters 
+
+culture.dates.df<-culture.dates.df[!(as.vector(culture.dates.df$isolate.id) %in% problem.genomes), ]
+
+# add summary info about the clusters 
+cluster.pt.summary.df<-IsolateClusterPtSummary(culture.dates.df = culture.dates.df)
+
+# add summary data to the culture.dates.df
+culture.dates.df<-cbind(culture.dates.df,cluster.pt.summary.df)
+
+
+culture.dates.df<-culture.dates.df[,!(duplicated(colnames(culture.dates.df)))]
+```
+
+
+
+#### Figure 2 and figure S2: patient traces indicating isolate MLSTs and surveillance culture dates
+-figure 2: ST258
+-figure S2: all MLSTS
+
+```{r}
+
+# sub trace for just patients with sequencing data
+
+room.trace.sub<-cluster.data.list$facility.trace
+room.trace.sub<-room.trace.sub[,as.character(unique(as.vector(culture.dates.df$patient.id)))]
+room.trace.sub[room.trace.sub>1.25]<-1 # leave negative culture dates
+
+#trace locations all as 1
+trace.df<-setNames(melt(room.trace.sub), c('date', 'patient.id', 'room'))
+trace.df$mlst<-NA
+
+# date, patient, mlst of culture on that date
+overlay.mlst.rooms.df<-culture.dates.df[,c('trace.format.culture.date','patient.id','mlst')]
+colnames(overlay.mlst.rooms.df)<-c('date', 'patient.id','mlst')
+overlay.mlst.rooms.df$room<-NA
+
+test<-rbind(overlay.mlst.rooms.df, trace.df)
+test$room[(is.na(test$room))]<-0
+
+
+# make a shape for actual culture vs non culture "rooms"
+test$culture.symbol<-test$room>1.5
+
+# for each patient add the first day they were ever in the LTACH for reordering
+
+test$first.day.in.study<-sapply(test$patient.id, FUN=function(pt){
+  
+culture.dates.df$first.day.in.study[culture.dates.df$patient.id ==pt][1]  
+
+})
+
+# add color indicator for type of patient
+
+pt.colors<-sapply(test$patient.id, FUN=function(pt){
+  
+culture.dates.df$is.index.pt[culture.dates.df$patient.id ==pt][1]  
+
+})
+
+room.cols<-c('white','lightgray','blue')
+
+pdf("../../../../../2020-08-28_cluster_manuscript_figs/2020-08-29_figure_S2")
+# plot all isolates from patients during the study
+ggplot(test, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=room.cols)+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle('KPC-Kp surveillance from LTACH patients')+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title="In LTACH"))+
+  scale_x_continuous(breaks = seq(min(test$date), max(test$date), by = 14), labels=seq(1,length(seq(min(test$date), max(test$date), by = 14)),by=1))+
+  theme(axis.text.y = element_text(size=1.5))+
+  geom_jitter(data=culture.dates.df, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id), fill=mlst),height = 0.3,width = 0.1,size = 1,colour='black',pch=21 )+
+  guides(fill=guide_legend(title="MLST"))+
+  coord_fixed(ratio=3)
+
+
+
+## Subset to plot only 1st isolate from patients during the study
+culture.dates.df.first.iso<-culture.dates.df[culture.dates.df$patient.isolate.order ==1,]
+
+# plot all isolates from patients during the study
+ggplot(test, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=room.cols)+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle('KPC-Kp surveillance from LTACH patients')+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title="In LTACH"))+
+  scale_x_continuous(breaks = seq(min(test$date), max(test$date), by = 14), labels=seq(1,length(seq(min(test$date), max(test$date), by = 14)),by=1))+
+  theme(axis.text.y = element_text(size=1.5))+
+  geom_jitter(data=culture.dates.df.first.iso, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id), fill=mlst),height = 0.3,width = 0.1,size = 1,colour='black',pch=21 )+
+  guides(fill=guide_legend(title="MLST"))+
+  coord_fixed(ratio=3)
+dev.off
+
+```
+
+
+####  Just plot individual traces for each MLST
+
+```{r}
+#pdf('../../../../../2020-08-28_cluster_manuscript_figs/2020-08-29_Figure_2_all_trace_by_MLST.pdf')
+
+#ggsave(file="../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/EPS_figures/fig_2_B-G_All_MLST_specific_traces.eps")
+
+ test$room[test$room == 0]<-'Out of LTACH'
+ test$room[test$room == 1]<-'In LTACH'
+ test$room[test$room == 1.25]<-'Negative KPC-Kp culture'
+
+ggplot(test, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=room.cols)+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle('KPC-Kp surveillance from LTACH patients')+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title=""))+
+  scale_x_continuous(breaks = seq(min(test$date), max(test$date), by = 14), labels=seq(1,length(seq(min(test$date), max(test$date), by = 14)),by=1))+
+  theme(axis.text.y = element_text(size=1.5),
+        axis.text.x = element_text(size=2))+
+  geom_jitter(data=culture.dates.df, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id), fill=mlst),height = 0.3,width = 0.1,size = 1,colour='black',pch=21 )+
+  guides(fill=guide_legend(title="Positive culture date for MLST"))+
+  coord_fixed(ratio=3)
+
+
+room.cols<-c("lightgray","white","blue")
+
+all.mlst.trace.plots<-sapply(unique(culture.dates.df$mlst), FUN=function(ST){
+   # plot the trace specific for patients with that MLST
+  test.ST<-test
+
+culture.dates.df.ST<-culture.dates.df[culture.dates.df$mlst == ST,]
+
+test.ST<-test.ST[test.ST$patient.id %in% unique(culture.dates.df.ST$patient.id), ]
+
+plot.name<-paste0('fig_2_MLST_',ST,'_.eps')
+
+#ggsave(filename = plot.name,path ='../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/EPS_figures/' )
+
+print(ggplot(test.ST, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=room.cols,labels = c("out of LTACH","In LTACH","Negative culture"))+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle(paste0('KPC-Kp surveillance from LTACH patients with MLST: ',ST))+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title=""))+
+  scale_x_continuous(breaks = seq(min(test.ST$date), max(test.ST$date), by = 14), labels=seq(1,length(seq(min(test.ST$date), max(test.ST$date), by = 14)),by=1))+
+   theme(axis.text.y = element_text(size=1.5),
+        axis.text.x = element_text(size=2.5))+
+  geom_jitter(data=culture.dates.df.ST, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id)),height = 0.3,width = 0.1,size = 1,colour='black',pch=19 )+
+  guides(fill=guide_legend(title="Positive culture date for MLST"))+
+  coord_fixed(ratio=3)+
+  theme_classic())
+#dev.off()
+  
+})
+
+
+
+```
+
+
+#### Order traces by the tree for the first isolate/patient for the MLST
+
+```{r}
+
+
+# susbet culture.dates.df for 1st isolate from each patient, pick 1 if they have > 1 of the MLST
+# for each MLST
+# subset 
+
+pdf('../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/Trace_trees_by_mlst_patient_type_one_isolate_per_patient_tree.pdf')
+
+
+for(MLST in names(all.mlst.align.lists)){
+  
+  #numeric MLST
+  current.mlst<-sub('st.','',MLST)
+  current.mlst<-sub('.aln.file','',current.mlst)
+  
+  #current MLST info 
+  current.mlst.list<-all.mlst.align.lists[[MLST]]
+  
+
+  # get tree
+  current.tree<-current.mlst.list$pars.tree
+  current.tree.first.iso<-current.mlst.list$pars.tree
+
+
+# plot tree subset for first isolate of mlst from patient with the trace
+
+  # subset for current MLST & 1st isolate per patient
+culture.dates.df.ST<-culture.dates.df[culture.dates.df$mlst == current.mlst & culture.dates.df$patient.isolate.order==1, ]
+
+# remove duplicate patient IDs for multiple first isolates collected at the same time
+  culture.dates.df.ST<-culture.dates.df.ST[!(duplicated(culture.dates.df.ST$patient.id)), ]
+  rownames(culture.dates.df.ST)<-culture.dates.df.ST$isolate.id # name trace data by isolates
+
+  
+  # tips to drop
+  tips.to.drop<-current.tree.first.iso$tip.label[!(current.tree.first.iso$tip.label %in% culture.dates.df.ST$isolate.id)]
+
+# subset tree for first isolate per patient of the MLST
+  current.tree.first.iso<-drop.tip(current.tree.first.iso, tips.to.drop)
+
+# get trace data for the isolates on the tree
+  pt.trace.ST<-data.frame(id=current.tree.first.iso$tip.label)
+
+  #trace list by isolate for each patient
+isolate.trace<-sapply(current.tree.first.iso$tip.label, FUN=function(isolate){
+  
+  # current.pt
+  current.pt<-culture.dates.df$patient.id[culture.dates.df$isolate.id == isolate]
+    
+  current.trace<-as.vector(trace.list$facility.trace[, as.character(current.pt)])
+  
+  current.trace
+})
+
+rownames(isolate.trace)<-rownames(trace.list$facility.trace)
+  
+isolate.trace.df<-as.data.frame(t(isolate.trace))
+isolate.trace.df[isolate.trace.df == 0]<-"Out of LTACH"
+isolate.trace.df[isolate.trace.df == 1]<-"In LTACH"
+isolate.trace.df[isolate.trace.df == 1.25]<-"Negative culture"
+isolate.trace.df[isolate.trace.df == 1.5]<-"Positive culture"
+
+
+
+culture.dates.df.ST<-lapply(current.tree.first.iso$tip.label, FUN=function(isolate){
+  
+  # current.pt
+  as.vector(culture.dates.df[culture.dates.df$isolate.id == isolate, ])
+    
+})
+culture.dates.df.ST<-do.call(rbind.data.frame, culture.dates.df.ST)
+rownames(culture.dates.df.ST)<-current.tree.first.iso$tip.label
+culture.dates.df.ST<-cbind(current.tree.first.iso$tip.label, culture.dates.df.ST)
+culture.dates.df.ST$Isolate[culture.dates.df.ST$index.isolate == TRUE]<-'Importation'
+culture.dates.df.ST$Isolate[culture.dates.df.ST$index.isolate == FALSE]<-'Acquisition'
+
+# set up tree for plotting with trace
+
+#plot.name<-paste0('fig_2_MLST_',MLST,'_.eps')
+
+#ggsave(filename = plot.name,path ='../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/EPS_figures/' )
+
+p <- ggtree(current.tree.first.iso) %<+% culture.dates.df.ST + 
+  #geom_tiplab(offset = .9, hjust = .5, size=1)+
+    geom_tippoint(aes(color = Isolate), size=1)+
+  scale_color_manual(values = c("Importation" = "gray40", "Acquisition" = "lightblue"))
+
+
+
+
+
+  
+colnames(isolate.trace.df)<-as.Date(as.numeric(colnames(isolate.trace.df)))
+
+
+
+#colnames(isolate.trace.df)[!(colnames(isolate.trace.df) %in% colnames(isolate.trace.df)[seq(1,367,30)])]<-'-'
+
+#print(colnames(isolate.trace.df))
+#stop()
+# tree with trace
+
+font.hack<-rep(.005,length(colnames(isolate.trace.df)))
+font.hack[seq(1,367,30)]<-2
+
+# print(gheatmap(p, isolate.trace.df, offset=.5, width=6, 
+ #       colnames=TRUE,font.size = font.hack,colnames_angle = 90,colnames_offset_y = -8) +
+  #    scale_fill_manual(values=c("darkgrey", "blue", "white","red"))+
+  #guides(fill=guide_legend(title="Surveillance")))
+print(gheatmap(p, isolate.trace.df, offset=.5, width=6, 
+        colnames=FALSE) +
+      scale_fill_manual(values=c("darkgrey", "blue", "white","red"))+
+  guides(fill=guide_legend(title="Surveillance")))
+
+
+
+
+#dev.off()
+## cluster Id 
+#tree with max distance in cluster
+# patient ID
+# converts after index in the cluster
+# index patient 
+#culture.dates.df.ST$mlst_clust<-factor(culture.dates.df.ST$mlst_clust)
+#p <- ggtree(current.tree.first.iso) %<+% culture.dates.df.ST + 
+#    geom_tippoint(aes(shape = Isolate), size=3) + 
+#geom_tippoint(aes(fill = cluster.id, x=x+.3), size=3) + 
+#geom_tippoint(aes(color =max.in.clust.dist , x=x+.6), size=3) 
+
+#p
+
+}# end for each mlst
+
+
+dev.off()
+
+
+
+
+
+
+```
+
+
+
+#### Plot tree with first isolate/patient and patient trace for each MLST
+
+```{r}
+
+pdf('../../../../../2020-08-28_cluster_manuscript_figs/2020-08-29_all_MLST_trace_by_first_date.pdf')
+
+test$room[test$room == 0]<-'Out of LTACH'
+test$room[test$room == 1]<-'In LTACH'
+test$room[test$room == 1.25]<-'Negative KPC-Kp culture'
+
+
+ggplot(test, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=rev(c(room.cols[1],room.cols[3],room.cols[2])))+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle('KPC-Kp surveillance from LTACH patients')+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title=""))+
+  scale_x_continuous(breaks = seq(min(test$date), max(test$date), by = 14), labels=seq(1,length(seq(min(test$date), max(test$date), by = 14)),by=1))+
+  theme(axis.text.y = element_text(size=1.5),
+        axis.text.x = element_text(size=2))+
+  geom_jitter(data=culture.dates.df, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id), fill=mlst),height = 0.3,width = 0.1,size = 1,colour='black',pch=21 )+
+  guides(fill=guide_legend(title="Positive culture date for MLST"))+
+  coord_fixed(ratio=3)
+
+
+# for each MLST
+all.mlst.trace.plots<-sapply(unique(culture.dates.df$mlst), FUN=function(ST){
+   # plot the trace specific for patients with that MLST
+  test.ST<-test
+
+# subset for current MLST & 1st isolate per patient
+culture.dates.df.ST<-culture.dates.df[culture.dates.df$mlst == ST & culture.dates.df$patient.isolate.order==1, ]
+
+test.ST<-test.ST[test.ST$patient.id %in% unique(culture.dates.df.ST$patient.id), ]
+
+print(ggplot(test.ST, aes(y=reorder(patient.id,first.day.in.study),  x=date, group=factor(patient.id))) + 
+    theme_bw()+
+    scale_color_manual(values=room.cols)+
+    xlab("Bi-weekly period") +
+  ylab("Patient")+
+  ggtitle('KPC-Kp surveillance from LTACH patients')+
+    geom_point(aes(color=factor(room)), size = 1, pch=15) +
+   guides(colour=guide_legend(title=""))+
+  scale_x_continuous(breaks = seq(min(test.ST$date), max(test.ST$date), by = 14), labels=seq(1,length(seq(min(test.ST$date), max(test.ST$date), by = 14)),by=1))+
+   theme(axis.text.y = element_text(size=1.5),
+        axis.text.x = element_text(size=2.5))+
+  geom_jitter(data=culture.dates.df.ST, aes(y=factor(patient.id), x=trace.format.culture.date, group=factor(patient.id)),height = 0.3,width = 0.1,size = 1,colour='lightblue',pch=19 )+
+  guides(fill=guide_legend(title="Positive culture date for MLST"))+
+  coord_fixed(ratio=3))+
+  theme_classic()
+
+  
+})
+
+dev.off()
+
+
+
+```
+
+
+Figure 2: 2 histograms overlaid showing index vs index SNV distance vs convert + index SNV distance  
+
+
+
+
+```{r}
+# Figure 2 B
+#  1 IMPORTAITON ISOLATE/PATIENT VS ALL INDEX VS 1 CONVERT ISOLATE/PATIENT VS ALL INDEX
+cluster.pt.df<-culture.dates.df
+cluster.pt.df<-cluster.pt.df[!duplicated(cluster.pt.df[c("patient.id","index.isolate")]), ]
+
+
+
+# all converts to closest index isolate and only 1st isolate from convert patients
+
+convert.to.index.iso<-as.vector(cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==FALSE & cluster.pt.df$patient.isolate.order == 1 & cluster.pt.df$last.isolate.neg.date < cluster.pt.df$trace.format.culture.date & cluster.pt.df$is.index.pt==FALSE])
+
+
+all.convert.to.all.index.dist<-sapply(as.vector(cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==FALSE & cluster.pt.df$patient.isolate.order == 1 & cluster.pt.df$last.isolate.neg.date < cluster.pt.df$trace.format.culture.date & cluster.pt.df$is.index.pt==FALSE]), FUN=function(cv.iso){
+  
+  min.cv.iso<-all.isolates.dist.mat[cv.iso, cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==TRUE & cluster.pt.df$patient.isolate.order==1 & cluster.pt.df$is.index.pt==TRUE]]
+ 
+  
+  # if there are only missing values return NA
+  if(sum(min.cv.iso %in% c(-1, 9999)) == length(min.cv.iso)){
+    NA
+  } else {
+      min.cv.iso<-min(min.cv.iso[min.cv.iso != -1 & min.cv.iso != 9999])
+  
+  min.cv.iso
+  
+  } # end else
+  
+
+})
+
+
+# all importation index to all other importation excluding the patients own isoaltes
+
+index.to.index.iso<-as.vector(cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==TRUE & cluster.pt.df$patient.isolate.order==1 ])
+
+all.index.to.all.index.dist<-sapply(as.vector(cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==TRUE & cluster.pt.df$patient.isolate.order==1  ]), FUN=function(cv.iso){
+  
+
+  # all index isolates that are not the current index isolate, or isolates from the same index patient
+  
+  current.index.pt<-as.vector(cluster.pt.df$patient.id)[as.vector(cluster.pt.df$isolate.id == cv.iso)]
+  
+  current.pts.isolates<-as.vector(cluster.pt.df$isolate.id)[as.vector(cluster.pt.df$patient.id) == current.index.pt]
+  
+  min.cv.iso<-all.isolates.dist.mat[cv.iso, setdiff(cluster.pt.df$isolate.id[ cluster.pt.df$index.isolate==TRUE & cluster.pt.df$patient.isolate.order==1  ], current.pts.isolates)]
+  
+  # if there are only missing values return NA
+  if(sum(min.cv.iso %in% c(-1, 9999)) == length(min.cv.iso)){
+    NA
+  } else {
+      min.cv.iso<-min(min.cv.iso[min.cv.iso != -1 & min.cv.iso != 9999])
+  
+  min.cv.iso
+  
+  } # end else
+  
+
+})
+
+
+# Plot histogram overlaying distance
+
+names(all.index.to.all.index.dist)<-rep('Admission Isolates',length(all.index.to.all.index.dist))
+names(all.convert.to.all.index.dist)<-rep('Acquisition Isolates', length(all.convert.to.all.index.dist))
+
+dist.hist.df<-c(all.index.to.all.index.dist, all.convert.to.all.index.dist)
+dist.hist.df<-as.data.frame(dist.hist.df)
+dist.hist.df$isolate.id<-c(index.to.index.iso, convert.to.index.iso)
+
+colnames(dist.hist.df)<-c('distance','isolate.id')
+dist.hist.df$mlst<-sapply(dist.hist.df$isolate.id,FUN=function(x){
+  iso.mlst<-as.vector(cluster.pt.df$mlst[cluster.pt.df$isolate.id == x])
+  if(iso.mlst == '258'){
+    '258'
+  } else {
+    'other'
+  }
+})
+dist.hist.df$comparison.type<-c(names(all.index.to.all.index.dist), names(all.convert.to.all.index.dist))
+
+# combined variable for mlst by comparison type for plotting
+
+dist.hist.df$mlst.comparison.type<-paste(dist.hist.df$mlst, dist.hist.df$comparison.type,sep='_')
+
+# if is > 200, make it 200 for plotting purposes
+dist.hist.df$distance[dist.hist.df$distance>200]<-200
+
+# subset for MLST specific plotting
+### ST258 distance
+# ST258 distance
+dist.hist.df.258<-dist.hist.df[dist.hist.df$mlst == '258',]
+
+dist.hist.other<-dist.hist.df[dist.hist.df$mlst != '258',]
+
+# plot with density
+pdf('../../../../../2020-08-28_cluster_manuscript_figs/2020-08-29_figure_3_S3.pdf')
+
+# all MLST
+
+ggplot(dist.hist.df, aes(x=distance,  fill=comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity")+
+ #geom_density(alpha=.2) +
+  ggtitle('All MLST') +
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_colour_manual(values=c(wes_palette(n=2, name="Royal2")))+
+  scale_fill_manual(values=c(wes_palette(n=2, name="Royal2"))) + 
+  theme_bw()
+
+
+
+
+ggplot(dist.hist.df.258, aes(x=distance, fill=comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity")+
+ #geom_density(alpha=.2) +
+  ggtitle('ST 258') +
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_colour_manual(values=c(wes_palette(n=2, name="GrandBudapest2")))+
+  scale_fill_manual(values=c(wes_palette(n=2, name="GrandBudapest2"))) + 
+  theme_bw()
+
+
+
+ggplot(dist.hist.other, aes(x=distance, fill=mlst.comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity")+
+ #geom_density(alpha=.2) +
+  ggtitle('Other ST') +
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_colour_manual(values=c(wes_palette(n=2, name="Moonrise3")))+
+  scale_fill_manual(values=c(wes_palette(n=2, name="Moonrise3")))+ 
+  theme_bw()
+
+dev.off()
+
+# all MLSTs
+print ('all mlsts')
+# KS test to show distributions are the same
+ks.test(dist.hist.df$distance[dist.hist.df$comparison.type== "Acquisition Isolates"], 
+        dist.hist.df$distance[dist.hist.df$comparison.type== "Admission Isolates"] )
+
+
+# ST258 only 
+print( 'st258 only')
+ks.test(dist.hist.df$distance[dist.hist.df$comparison.type== "Acquisition Isolates" & dist.hist.df$mlst == 258 ], 
+        dist.hist.df$distance[dist.hist.df$comparison.type== "Admission Isolates" & dist.hist.df$mlst == 258] )
+
+# other MLSTs
+print( 'non ST258 only')
+ks.test(dist.hist.df$distance[dist.hist.df$comparison.type== "Acquisition Isolates" & dist.hist.df$mlst != 258 ], 
+        dist.hist.df$distance[dist.hist.df$comparison.type== "Admission Isolates" & dist.hist.df$mlst != 258] )
+
+```
+
+
+##### Plot comparison with grey scale
+
+```{r}
+ggplot(dist.hist.df, aes(x=distance,  fill=comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity")+
+ #geom_density(alpha=.2) +
+  ggtitle('All MLST') +
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_colour_manual(values=c(wes_palette(n=2, name="Royal2")))+
+  scale_fill_manual(values=c(wes_palette(n=2, name="Royal2"))) + 
+  theme_bw()
+
+
+ggsave(device = 'eps',filename = "fig_3.eps", path = '../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/EPS_figures/')
+
+print(ggplot(dist.hist.df.258, aes(x=distance, fill=comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity", binwidth=2)+
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_fill_manual(values=c("grey60", "grey10")) + 
+  theme_bw()+
+    theme(text = element_text(size=20))+
+  xlab("SNV Distance") + ylab("Density"))
+
+dev.off()
+
+ggplot(dist.hist.other, aes(x=distance, fill=mlst.comparison.type)) + 
+ geom_histogram(aes(y=..density..), alpha=0.5, 
+                position="identity")+
+ #geom_density(alpha=.2) +
+  ggtitle('Other ST') +
+  guides(fill=guide_legend(title="Isolate Comparison")) +
+  scale_colour_manual(values=c(wes_palette(n=2, name="Moonrise3")))+
+  scale_fill_manual(values=c(wes_palette(n=2, name="Moonrise3")))+ 
+  theme_bw()
+
+```
+
+
+#### Add column for how many convert patients isolates are after every index patient's isolate for the MLST
+
+```{r}
+
+
+pts.with.converts.after.isolate.per.mlst<-sapply(unique(culture.dates.df$isolate.id), FUN=function(iso){
+  
+  # last negative date for the isolate
+  isolate.date<-culture.dates.df$last.isolate.neg.date[culture.dates.df$isolate.id == iso]
+  current.mlst<-culture.dates.df$mlst[culture.dates.df$isolate.id == iso]
+  current.pt<-culture.dates.df$patient.id[culture.dates.df$isolate.id == iso]
+  
+  
+  # number of index patients with convert isolates from other patients occur after their last negative date for the isolate
+  # culture after the isolate
+  # convert isolate
+  # not from current patient
+  # from same mlst
+  
+pot.recip.count<-length(unique(culture.dates.df$patient.id[culture.dates.df$trace.format.culture.date >isolate.date & culture.dates.df$index.isolate==FALSE &  culture.dates.df$patient.id != current.pt & culture.dates.df$mlst==current.mlst]))
+  pot.recip.count
+  
+})
+
+# add to the dataframe 
+culture.dates.df$potential.recip.pt.count<-pts.with.converts.after.isolate.per.mlst
+
+
+# potential donor counts: how many potential index patient donors for each isolate
+
+potential.donor.pt.count.per.isolate.mlst<-sapply(unique(culture.dates.df$isolate.id), FUN=function(iso){
+  
+  # last negative date for the isolate
+  isolate.date<-culture.dates.df$last.isolate.neg.date[culture.dates.df$isolate.id == iso]
+  current.mlst<-culture.dates.df$mlst[culture.dates.df$isolate.id == iso]
+  current.pt<-culture.dates.df$patient.id[culture.dates.df$isolate.id == iso]
+  
+  
+  # number of index patients with convert isolates from other patients occur after their last negative date for the isolate
+  # culture before the isolate
+  # index isolate
+  # not from current patient
+  # from same mlst
+  
+pot.donor.count<-length(unique(culture.dates.df$patient.id[culture.dates.df$trace.format.culture.date <= isolate.date & culture.dates.df$index.isolate==TRUE &  culture.dates.df$patient.id != current.pt & culture.dates.df$mlst==current.mlst]))
+  pot.donor.count
+  
+})
+
+
+culture.dates.df$potential.index.donor.count<-potential.donor.pt.count.per.isolate.mlst
+```
+
+
+#### Table 1: 	Distribution of patients who imported or acquired KPC-Kp colonization in the LTACH
+
+```{r}
+
+# N isolates
+isolates.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(culture.dates.df$isolate.id[culture.dates.df$mlst==st])
+})
+print('isolates')
+isolates.mlst.count
+
+# N patients/MLST
+pts.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$patient.id[culture.dates.df$mlst==st]))
+})
+print('patients')
+pts.mlst.count
+
+#index isolate
+index.isolates.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$isolate.id[culture.dates.df$mlst==st & culture.dates.df$index.isolate==TRUE]))
+})
+print('index isolates')
+index.isolates.mlst.count
+
+# index patients
+index.pts.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$patient.id[culture.dates.df$mlst==st & culture.dates.df$index.isolate==TRUE]))
+})
+
+print('index patients')
+index.pts.mlst.count
+
+# convert isolates
+convert.isolates.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$isolate.id[culture.dates.df$mlst==st & culture.dates.df$index.isolate==FALSE]))
+})
+print('convert isolates')
+convert.isolates.mlst.count
+
+
+# convert patients
+convert.pts.mlst.count<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$patient.id[culture.dates.df$mlst==st & culture.dates.df$index.isolate==FALSE]))
+})
+print('convert patients')
+convert.pts.mlst.count
+
+
+print('number of index patients with at least 1 convert patient after')
+possible.index.source.pts<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$patient.id[culture.dates.df$mlst==st & culture.dates.df$potential.recip.pt.count>0 & culture.dates.df$is.index.pt==TRUE & culture.dates.df$index.isolate ==TRUE]))
+})
+possible.index.source.pts
+
+
+print('number of convert patients with at least 1 index patient before')
+convert.pts.with.index.source<-sapply(unique(culture.dates.df$mlst), FUN=function(st){
+  length(unique(culture.dates.df$patient.id[culture.dates.df$mlst==st & culture.dates.df$potential.index.donor.count>0 & culture.dates.df$is.index.pt==FALSE & culture.dates.df$index.isolate ==FALSE]))
+})
+convert.pts.with.index.source
+
+
+
+
+table.1.mlst.summary<-as.data.frame(cbind(isolates.mlst.count, pts.mlst.count, index.isolates.mlst.count, index.pts.mlst.count, convert.isolates.mlst.count, convert.pts.mlst.count,possible.index.source.pts,convert.pts.with.index.source ))
+
+table.1.mlst.summary<-table.1.mlst.summary[c(as.character(sort(as.numeric(rownames(table.1.mlst.summary)))),'Novel'),]
+
+table.1.mlst.summary$potential.in.ltach.acquisition[table.1.mlst.summary$convert.pts.mlst.count>1]<-'yes'
+table.1.mlst.summary$potential.in.ltach.acquisition[table.1.mlst.summary$convert.pts.mlst.count<=1]<-'no'
+table.1.mlst.summary$mlst<-rownames(table.1.mlst.summary)
+#colSums(table.1.mlst.summary[,1:ncol(table.1.mlst.summary)-2])
+
+write.xlsx(table.1.mlst.summary, file='../../../../../cluster_figures/table_1.xlsx')
+```
+
+
+#### Figure 3 B: plot distribution of cluster size by isolates indicating  patients in transmission clusters
+-barbplot: y =number of patients, x = clusters, colors = type of patient, facet =MLST
+-label by clusters that have 1 index patient in them who was positive prior to all convert isolates in the cluster  
+
+
+```{r}
+
+# format df for plotting
+# remove non-cluster cluster 1 group
+# columns needed for plotting patient types in clusters
+
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# convert isolates for the cluster: primary acquisition
+cluster.pt.df$convert.isolate<-cluster.pt.df$index.isolate==FALSE & cluster.pt.df$is.index.pt == FALSE
+
+# convert isolates from index patients: secondary acquisiton 
+cluster.pt.df$convert.isolate.index<-cluster.pt.df$index.isolate == FALSE & cluster.pt.df$is.index.pt == TRUE
+
+
+# patient type for cluster based on isolate in the cluster
+cluster.pt.df$cluster.pt.type[cluster.pt.df$convert.isolate ==TRUE & cluster.pt.df$is.index.pt==FALSE]<-'Convert acquisition'
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$convert.isolate.index ==TRUE]<-'Index secondary acquisition'
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$index.isolate ==TRUE & cluster.pt.df$study.start.index.isolate==FALSE ]<-'Admission positive'
+
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$index.isolate ==TRUE & cluster.pt.df$study.start.index.isolate==TRUE]<-'Positive at study start'
+
+# weak index isolates
+# isolates from patients treated as convert but had no negative surveillance
+weak.index.isolates<-as.vector(culture.dates.df$isolate.id[culture.dates.df$patient.isolate.order==1 & is.na(culture.dates.df$first.patient.neg.date) & culture.dates.df$is.index.pt==FALSE])
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$isolate.id %in% weak.index.isolates]<-'Positive >3 days in LTACH & no negative swab'
+
+
+
+
+cluster.pt.df<-cluster.pt.df[,c('mlst_clust','cluster.pt.type')]
+
+cluster.pt.plot<-melt(cluster.pt.df, id.vars = 'mlst_clust')
+
+cluster.pt.plot<-(cast(cluster.pt.plot, mlst_clust~value, length))
+
+cluster.pt.plot<-melt(cluster.pt.plot, id.vars=c('mlst_clust'),var='cluster.pt.type')
+
+colnames(cluster.pt.plot)<-c('mlst_clust', 'pt_count','pt_type')
+
+cluster.pt.plot$mlst<-sub('_.*','',cluster.pt.plot$mlst_clust)
+
+
+# add the cluster patient count to order the clusters within each MLST
+cluster.pt.plot$cluster.pt.count<-sapply(unique(cluster.pt.plot$mlst_clust),FUN=function(x){
+  unique(as.vector(culture.dates.df$clust.pt.count[as.vector(culture.dates.df$mlst_clust == x)]))
+})
+
+
+# add indicator variable for type of cluster
+cluster.pt.plot$cluster.category<-sapply(cluster.pt.plot$mlst_clust,FUN=function(x){
+  
+c(as.vector(culture.dates.df$mlst_clust) == x & culture.dates.df$cluster.category == 'single.index'& as.vector(culture.dates.df$converts.after.index) == as.vector(culture.dates.df$convert.pt.count))[1]
+})
+cluster.pt.plot$cluster.category[cluster.pt.plot$cluster.category==TRUE]<-'T'
+cluster.pt.plot$cluster.category[cluster.pt.plot$cluster.category==FALSE]<-'F'
+
+
+# add column for isolates for ordering plot by number of isolates
+cluster.pt.plot$isolate.count<-sapply(cluster.pt.plot$mlst_clust,FUN=function(x){
+  sum(cluster.pt.plot$cluster.pt.count[cluster.pt.plot$mlst_clust == x])
+})
+
+
+ggplot(cluster.pt.plot, aes(x = reorder(x=mlst_clust, pt_count),
+                            y = pt_count, fill = pt_type)) + 
+ geom_bar(stat = 'identity', position = 'stack') +
+facet_grid(~mlst, scales = "free_x", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(n=4, name="GrandBudapest2"),'darkgrey'))+
+theme(panel.background = element_blank(), legend.position='right',
+      strip.text = element_text(size = 8))+
+theme(axis.text.x=element_blank()) +
+guides(fill=guide_legend(title="Types of patients in clusters")) +
+xlab("transmission clusters") +
+ylab("Isolates")+
+  scale_y_continuous(breaks=seq(1,20,by=1)) 
+#+
+# add indicator of cluster category
+#geom_text(aes(label=cluster.category), position='stack')
+
+# Make table for under plot with number of Patients
+# Admission positive for at least 1 isolate
+# Study start positive for at least 1 isolate
+# Convert acquisition for at least 1 isolate
+# Index secondary acquisition for at least 1 isolate
+# culture after 3 days with no negative swab for at least 1 isolate (weak index)
+
+
+
+```
+
+
+#### plot patients per cluster colored by the patient's category only
+
+
+```{r}
+
+# format df for plotting
+# remove non-cluster cluster 1 group
+# columns needed for plotting patient types in clusters
+
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+# get only 1 first isolate that puts a patient in the cluster for plotting
+cluster.pt.df<-cluster.pt.df[!duplicated(cluster.pt.df[c("patient.id","mlst_clust")]),]
+
+
+# convert isolates for the cluster: primary acquisition
+cluster.pt.df$convert.isolate<-cluster.pt.df$index.isolate==FALSE & cluster.pt.df$is.index.pt == FALSE
+
+# convert isolates from index patients: secondary acquisiton 
+cluster.pt.df$convert.isolate.index<-cluster.pt.df$index.isolate == FALSE & cluster.pt.df$is.index.pt == TRUE
+
+
+# patient type for cluster based on isolate in the cluster
+cluster.pt.df$cluster.pt.type[cluster.pt.df$convert.isolate ==TRUE & cluster.pt.df$is.index.pt==FALSE]<-'Convert acquisition'
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$convert.isolate.index ==TRUE]<-'Index secondary acquisition'
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$index.isolate ==TRUE & cluster.pt.df$study.start.index.isolate==FALSE ]<-'Admission positive'
+
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$index.isolate ==TRUE & cluster.pt.df$study.start.index.isolate==TRUE]<-'Positive at study start'
+
+# weak index isolates
+# isolates from patients treated as convert but had no negative surveillance
+weak.index.isolates<-as.vector(culture.dates.df$isolate.id[culture.dates.df$patient.isolate.order==1 & is.na(culture.dates.df$first.patient.neg.date) & culture.dates.df$is.index.pt==FALSE])
+
+cluster.pt.df$cluster.pt.type[cluster.pt.df$isolate.id %in% weak.index.isolates]<-'Positive >3 days in LTACH & no negative swab'
+
+
+
+
+cluster.pt.df<-cluster.pt.df[,c('mlst_clust','is.index.pt')]
+
+cluster.pt.plot<-melt(cluster.pt.df, id.vars = 'mlst_clust')
+
+cluster.pt.plot<-(cast(cluster.pt.plot, mlst_clust~value, length))
+
+cluster.pt.plot<-melt(cluster.pt.plot, id.vars=c('mlst_clust'),var='cluster.pt.type')
+
+colnames(cluster.pt.plot)<-c('mlst_clust', 'pt_count','pt_type')
+
+cluster.pt.plot$mlst<-sub('_.*','',cluster.pt.plot$mlst_clust)
+
+
+# add the cluster patient count to order the clusters within each MLST
+cluster.pt.plot$cluster.pt.count<-sapply(unique(cluster.pt.plot$mlst_clust),FUN=function(x){
+  unique(as.vector(culture.dates.df$clust.pt.count[as.vector(culture.dates.df$mlst_clust == x)]))
+})
+
+
+# add indicator variable for type of cluster
+cluster.pt.plot$cluster.category<-sapply(cluster.pt.plot$mlst_clust,FUN=function(x){
+  
+c(as.vector(culture.dates.df$mlst_clust) == x & culture.dates.df$cluster.category == 'single.index'& as.vector(culture.dates.df$converts.after.index) == as.vector(culture.dates.df$convert.pt.count))[1]
+})
+cluster.pt.plot$cluster.category[cluster.pt.plot$cluster.category==TRUE]<-'T'
+cluster.pt.plot$cluster.category[cluster.pt.plot$cluster.category==FALSE]<-'F'
+
+
+ggplot(cluster.pt.plot, aes(x = reorder_within(x=mlst_clust, by=cluster.pt.count, within=mlst_clust),
+                            y = pt_count, fill = pt_type)) + 
+ geom_bar(stat = 'identity', position = 'stack') +
+#facet_grid(~ mlst, scales = "free_x", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(n=4, name="GrandBudapest2"),'lightgrey'))+
+theme(panel.background = element_blank(), legend.position='right',
+      strip.text = element_text(size = 5),
+      axis.text.y=element_text(size=20))+
+theme(axis.text.x=element_blank()) +
+guides(fill=guide_legend(title="Types of patients in clusters")) +
+xlab("transmission clusters") +
+ylab("Isolates")+
+  scale_y_continuous(breaks=seq(1,20,by=1)) 
+#+
+# add indicator of cluster category
+#geom_text(aes(label=cluster.category), position='stack')
+
+# Make table for under plot with number of Patients
+# Admission positive for at least 1 isolate
+# Study start positive for at least 1 isolate
+# Convert acquisition for at least 1 isolate
+# Index secondary acquisition for at least 1 isolate
+# culture after 3 days with no negative swab for at least 1 isolate (weak index)
+
+```
+
+
+#### Summarize number of patients in clusters
+
+```{r}
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+cluster.pt.df<-cluster.pt.df[,unique(colnames(cluster.pt.df))]
+
+print('patients in clusters: ')
+summary(cluster.pt.df$clust.pt.count)
+
+# acquisitions that occured during the study
+# including index who had multiple isolates
+print('patients with acquisition isolates in clusters: ')
+length(unique(cluster.pt.df$patient.id[cluster.pt.df$index.isolate==FALSE]))
+
+print('True converts: patients with acquisition isolates in clusters who are not index ')
+length(unique(cluster.pt.df$patient.id[cluster.pt.df$index.isolate==FALSE & cluster.pt.df$is.index.pt==FALSE]))
+
+print('unique patients in the clusters')
+length(unique(cluster.pt.df$patient.id))
+
+print('diverstiy in clusters, min, max')
+min(cluster.pt.df$max.in.clust.dist)
+max(cluster.pt.df$max.in.clust.dist)
+
+# max diversity in clusters > 30
+print('clusters with diversity > 30 SNV: ')
+length(unique(cluster.pt.df$mlst_clust[cluster.pt.df$max.in.clust.dist > 30]))
+
+# max diversity in clusters > 30 and multiple index pts 
+print('clusters with diversity > 30 SNV and multiple index patients : ')
+length(unique(cluster.pt.df$mlst_clust[cluster.pt.df$max.in.clust.dist > 30 & cluster.pt.df$index.pt.count > 1]))
+
+# # one row per cluster
+# subset for unique clusters for across cluster summaries
+cluster.pt.df<-cluster.pt.df[!duplicated(cluster.pt.df[c("mlst_clust")]),]
+
+print('diverstiy in clusters median')
+median(cluster.pt.df$max.in.clust.dist)
+
+
+# N single index index first clusters
+print('single index clusters')
+sum(cluster.pt.df$index.pt.count == 1)
+
+print('converts in single index cluster ')
+sum(cluster.pt.df$convert.pt.count[cluster.pt.df$index.pt.count == 1])
+
+print('single index prior to all converts clusters: ')
+sum(cluster.pt.df$index.pt.count == 1 & cluster.pt.df$converts.after.index == cluster.pt.df$convert.pt.count & !(is.na(cluster.pt.df$index.pt.count)))
+
+# N converts in single index first clusters
+print('converts in single index first clusters' )
+sum(cluster.pt.df$convert.pt.count[cluster.pt.df$index.pt.count == 1 & cluster.pt.df$converts.after.index == cluster.pt.df$convert.pt.count & !(is.na(cluster.pt.df$index.pt.count))])
+
+
+# N uncertain clusters: multiple index, 
+print('converts in multiple index' )
+sum(cluster.pt.df$convert.pt.count[cluster.pt.df$index.pt.count > 1 & !(is.na(cluster.pt.df$index.pt.count))])
+
+#no index, 
+print('converts in no index clusters' )
+sum(cluster.pt.df$convert.pt.count[cluster.pt.df$index.pt.count == 0 & !(is.na(cluster.pt.df$index.pt.count))])
+
+print('converts in single index clusters but they arent first')
+sum(cluster.pt.df$convert.pt.count[cluster.pt.df$index.pt.count == 1 & 41/!(is.na(cluster.pt.df$index.pt.count)) & cluster.pt.df$converts.after.index != cluster.pt.df$convert.pt.count & !(is.na(cluster.pt.df$index.pt.count))])
+
+# summarize distance
+
+print('summary max in cluster distance' )
+
+
+# convert isolates and patients that are not in clusters
+
+#cluster.pt.df
+#culture.dates.df
+
+
+# df of excluded converts
+excluded.converts<-culture.dates.df[culture.dates.df$is.index.pt ==FALSE & (is.na(culture.dates.df$cluster.id) | culture.dates.df$cluster.id ==1), ]
+
+print('unique convert patients not in clusters: ')
+setdiff(excluded.converts$patient.id, cluster.pt.df$patient.id)
+
+print('distribution of MLSTS of isolates excluded from clusters')
+table(excluded.converts$mlst)
+
+
+
+```
+
+
+
+
+##### Figure 4: scatter plots with max intra-cluster distance, barplot with mutation rate, scatter plot with intra-cluster index distance vs intra-clustr convert distance
+-AT to CG transversions for GO-defective (i.e., mutT) mutators  
+-and AT to GC and GC to AT transitions for MMR-defective mutators  
+
+```{r}
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+cluster.pt.df<-cluster.pt.df[,unique(colnames(cluster.pt.df))]
+
+# box plot for each cluster indicating intra-cluster diversity
+cluster.diversity.plot<-ggplot(data = cluster.pt.df, aes(x=mlst_clust, y=max.in.clust.dist)) + 
+             geom_point(aes(fill=cluster.category), colour="black",pch=21, size=1.75, position = position_jitter(w = 0.15, h = 0))+
+facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(2, name="Moonrise3"),wes_palette(4, name="GrandBudapest2")[4]), labels=c("Convert patients only","Multiple index patients","Single index patient"))+
+  theme_bw()+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0)) +
+  labs( x ="Transmission Clusters", y = "Max SNV distance \n between isolates in cluster",fill='Cluster Type') +
+  theme(legend.position="bottom")+
+  labs(tag='A')
+
+# figure 4A
+cluster.diversity.plot
+
+
+
+
+
+# plot diversity with no MLSTs and no colors by cluster type
+
+# box plot for each cluster indicating intra-cluster diversity
+ggplot(data = cluster.pt.df, aes(x=mlst_clust, y=max.in.clust.dist)) + 
+             geom_point(aes(fill="#F4B5BD"), colour="black",pch=21, size=3, position = position_jitter(w = 0.15, h = 0))+
+  theme_bw()+
+  theme( axis.text.y=element_text(size=20)) +
+  labs( x ="Transmission Clusters", y = "Max SNV distance \n between isolates in cluster",fill='Cluster Type') +
+  theme(legend.position="bottom")+
+     scale_y_continuous(name='Patients',limits = c(0,160), breaks=seq(0,160,10))
+
+
+```
+
+
+#### Figure 4 A: Mutation rates for each cluster
+
+```{r}
+# dataframe containing all of the mutaiton analysis results
+mut.df<-do.call(rbind.data.frame, mutator.df.list)
+
+# Make column for mlst_clust in mutation df corresponding to the cluster and MSLT names in the other dfs
+mut.df$mlst_clust<-rownames(mut.df)
+mut.df$mlst_clust<-sub('.aln.file*','', mut.df$mlst_clust)
+mut.df$mlst_clust<-sub('st.','',mut.df$mlst_clust)
+mut.df$mlst_clust<-sub('\\.','_',mut.df$mlst_clust)
+
+# subset for clusters with putative transmission links in the LTACH in them
+# same clusters that are in the prior plots
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+# unique cluusters to plot mutation rates for
+mut.plot.clust<-sort(unique(cluster.pt.df$mlst_clust))
+
+# subset mutation df for just potential transmission clsuters
+mut.df.sub<-mut.df
+mut.df.sub<-mut.df.sub[mut.df.sub$mlst_clust %in% mut.plot.clust,]
+
+# add rows for population frequency for comparison
+mut.df.sub<-rbind(mut.df.sub, mut.df[grepl('Population frequency',mut.df$mlst_clust),])
+# remove 874 mlst because there are no clusters in this MLST
+
+
+melt.mut.df<-melt(data = mut.df.sub, id.vars = "mlst_clust", measure.vars = c("GC_AT_transition_rate"  , "AT_GC_transition_rate",   "GC_TA_transversion_rate", "AT_TA_transversion_rate", "GC_CG_transversion_rate", "AT_CG_transversion_rate"))
+
+# add mlst for facets
+melt.mut.df$mlst<-sub('_.*','',melt.mut.df$mlst_clust)
+
+melt.mut.df<-melt.mut.df[melt.mut.df$mlst != '874',]
+
+ggplot(data=melt.mut.df, aes(x=mlst_clust, y=value, fill=variable)) +
+  geom_bar(stat="identity") +
+  facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(3, name="Moonrise3"),wes_palette(3, name="GrandBudapest2")), labels=c("GC->AT Transition","AT-> GC Transition",'GC->TA Transversion',"AT->TA Transversion", 'GC->CG Transversion','AT->CG Transversion'))+
+  theme_bw() +
+  labs( x ="Transmission Clusters", y = "Mutation Frequency",fill='Mutation')+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+
+mut.freq.plot<-ggplot(data=melt.mut.df, aes(x=mlst_clust, y=value, fill=variable)) +
+  geom_bar(stat="identity") +
+  facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(3, name="Moonrise3"),wes_palette(3, name="GrandBudapest2")), labels=c("GC->AT Transition","AT-> GC Transition",'GC->TA Transversion',"AT->TA Transversion", 'GC->CG Transversion','AT->CG Transversion'))+
+  theme_bw() +
+  labs( x ="Transmission Clusters", y = "Mutation Frequency",fill='Mutation')+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))+
+  theme(legend.position="bottom")+
+  labs(tag='B')
+
+
+grid.arrange(cluster.diversity.plot, mut.freq.plot, ncol=1)
+
+```
+
+## Figure 4B: only with clusters with >30 SNV distance between isolates in the clsuter
+
+```{r}
+
+
+
+# dataframe containing all of the mutaiton analysis results
+mut.df<-do.call(rbind.data.frame, mutator.df.list)
+
+# Make column for mlst_clust in mutation df corresponding to the cluster and MSLT names in the other dfs
+mut.df$mlst_clust<-rownames(mut.df)
+mut.df$mlst_clust<-sub('.aln.file*','', mut.df$mlst_clust)
+mut.df$mlst_clust<-sub('st.','',mut.df$mlst_clust)
+mut.df$mlst_clust<-sub('\\.','_',mut.df$mlst_clust)
+
+# subset for clusters with putative transmission links in the LTACH in them
+# same clusters that are in the prior plots
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0 & !(is.na(culture.dates.df$max.in.clust.dist)) & culture.dates.df$max.in.clust.dist >=30 , ]
+
+# unique cluusters to plot mutation rates for
+mut.plot.clust<-sort(unique(cluster.pt.df$mlst_clust))
+
+# subset mutation df for just potential transmission clsuters
+mut.df.sub<-mut.df
+mut.df.sub<-mut.df.sub[mut.df.sub$mlst_clust %in% mut.plot.clust,]
+
+# add rows for population frequency for comparison
+mut.df.sub<-rbind(mut.df.sub, mut.df[grepl('Population frequency',mut.df$mlst_clust),])
+# remove 874 mlst because there are no clusters in this MLST
+
+
+melt.mut.df<-melt(data = mut.df.sub, id.vars = "mlst_clust", measure.vars = c("GC_AT_transition_rate"  , "AT_GC_transition_rate",   "GC_TA_transversion_rate", "AT_TA_transversion_rate", "GC_CG_transversion_rate", "AT_CG_transversion_rate"))
+
+# add mlst for facets
+melt.mut.df$mlst<-sub('_.*','',melt.mut.df$mlst_clust)
+
+melt.mut.df<-melt.mut.df[melt.mut.df$mlst != '874',]
+
+ggplot(data=melt.mut.df, aes(x=mlst_clust, y=value, fill=variable)) +
+  geom_bar(stat="identity") +
+  facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(3, name="Moonrise3"),wes_palette(3, name="GrandBudapest2")), labels=c("GC->AT Transition","AT-> GC Transition",'GC->TA Transversion',"AT->TA Transversion", 'GC->CG Transversion','AT->CG Transversion'))+
+  theme_bw() +
+  labs( x ="Transmission Clusters", y = "Mutation Frequency",fill='Mutation')+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+
+
+# remove ST 13, this is just the population freq col
+melt.mut.df<-melt.mut.df[melt.mut.df$mlst != '13',]
+melt.mut.df<-melt.mut.df[melt.mut.df$mlst != "13_Population frequency",]
+
+
+mut.freq.plot<-ggplot(data=melt.mut.df, aes(x=mlst_clust, y=value, fill=variable)) +
+  geom_bar(stat="identity") +
+  facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(3, name="Moonrise3"),wes_palette(3, name="GrandBudapest2")), labels=c("GC->AT Transition","AT-> GC Transition",'GC->TA Transversion',"AT->TA Transversion", 'GC->CG Transversion','AT->CG Transversion'))+
+  theme_bw() +
+  labs( x ="Transmission Clusters", y = "Mutation Frequency",fill='Mutation')+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))+
+  theme(legend.position="bottom")+
+  labs(tag='B')
+
+
+```
+
+
+### Make pairwise distance heatmap for defense presentation
+-index vs convert isolates indicated
+-first isolate from each patient
+
+```{r}
+# pheatmap of snp distance
+
+all.isolates.dist.mat.plot<-all.isolates.dist.mat
+all.isolates.dist.mat.plot[all.isolates.dist.mat.plot > 500]<-100
+all.isolates.dist.mat.plot[all.isolates.dist.mat.plot < 1]<-500
+
+# subset for just st258
+all.isolates.dist.mat.plot<-all.isolates.dist.mat.plot[colnames(all.isolates.dist.mat.plot) %in% as.vector(culture.dates.df$isolate.id)[as.vector(culture.dates.df$mlst) == '258'], colnames(all.isolates.dist.mat.plot) %in% as.vector(culture.dates.df$isolate.id)[as.vector(culture.dates.df$mlst) == '258']]
+
+
+anot.col<-rep('Acquisition',ncol(all.isolates.dist.mat.plot))
+
+anot.col[colnames(all.isolates.dist.mat.plot) %in% as.vector(culture.dates.df$isolate.id)[as.vector(culture.dates.df$index.isolate) == TRUE]]<-'Admission positive'
+
+# make anot col into df
+anot.col<-as.data.frame(anot.col)
+rownames(anot.col)<-colnames(all.isolates.dist.mat.plot)
+colnames(anot.col)<-'Isolate type'
+         
+annotCols = list( "Isolate type" = c("darkgrey", "lightblue") )
+names(annotCols[[1]]) = c( "Admission positive", "Acquisition" )
+
+mybreaks<-c(seq(0,100,10))
+mycols<-c('white',wes_palette(n=9, name="Darjeeling1",type = 'continuous'))
+
+
+  pheatmap(all.isolates.dist.mat.plot,
+           scale = "none",
+           fontsize_number = .3,
+  cluster_cols = TRUE,
+  cluster_rows      = TRUE,
+           legend = TRUE,
+           fontsize = 5,
+           annotation_col= anot.col,
+           annotation_row= anot.col,
+           annotation_colors=annotCols,
+           breaks=mybreaks,
+  color=mycols)#,
+           #colors=mycols,
+           #breaks = mybreaks)
+  
+
+
+```
+
+
+
+
+#### Figure 4 C: index vs convert intra-patient intra-cluster diversity
+-box plot with points
+
+```{r}
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+cluster.pt.df$pt.type[cluster.pt.df$index.isolate == TRUE]<-'Index'
+cluster.pt.df$pt.type[cluster.pt.df$index.isolate == FALSE]<-'Convert'
+
+# number of convert patients with >1 isolate per cluster
+
+# number of index patients with >1 isolate per cluster
+
+
+
+
+# plot only one point per patient: e.g max intra-patient distance per patient per cluster
+cluster.pt.df<- cluster.pt.df[order(cluster.pt.df$patient.id, -(cluster.pt.df$max.intra.pt.clust), cluster.pt.df$patient.isolate.order), ]
+cluster.pt.df<-cluster.pt.df[!duplicated(cluster.pt.df[c("patient.id","mlst_clust")]),]
+
+
+# add indicator for hyper mutators in convert category
+cluster.pt.df$mlst[cluster.pt.df$mlst_clust == '16_16' & cluster.pt.df$max.intra.pt.clust >30 & cluster.pt.df$index.isolate==FALSE & !(is.na(cluster.pt.df$max.intra.pt.clust))]<-'16 mutator'
+
+cluster.pt.df$mlst[cluster.pt.df$mlst_clust == '258_117' & cluster.pt.df$max.intra.pt.clust >30 & cluster.pt.df$index.isolate==FALSE & !(is.na(cluster.pt.df$max.intra.pt.clust))]<-'258 mutator'
+
+# box plot for each cluster indicating intra-cluster diversity
+ggplot(data = cluster.pt.df, aes(x=pt.type, y=max.intra.pt.clust)) + 
+             geom_point(aes(fill=mlst), colour="black",pch=21, size=3, position = position_jitter(w = 0.25, h = 0))+
+#facet_grid( ~ mlst, scales="free", space="free_x") +
+  scale_fill_manual(values=c(wes_palette(4, name="Moonrise3")[1:3],'blue',
+                             wes_palette(4, name="Royal1")[1], 'orange'))+ #, #labels=c("Convert patients only","Multiple index patients","Single index patient"))+
+  theme_bw()+
+  theme(axis.text.x=element_text(hjust = 0, size = 12),
+        axis.text.y=element_text(hjust = 0, size = 12)) +
+  labs( x ="Isolate Category", y = "Max intra-patient SNV distance \n between isolates in cluster",fill='Cluster MLST') +
+    stat_summary(
+    geom = "point",
+    fun.y = "median",
+    col = "black",
+    size = 4,
+    shape = 24,
+    fill = "red"
+  ) +
+  scale_y_continuous(trans='pseudo_log', breaks=c(0, 1, 10, 100,200)) 
+
+  
+
+# all index isolates in cluster distance vs all convert isolates in cluster distance
+wilcox.test(cluster.pt.df$max.intra.pt.clust[cluster.pt.df$index.isolate==TRUE],cluster.pt.df$max.intra.pt.clust[cluster.pt.df$index.isolate==FALSE], alternative = 'greater')
+
+
+# for presentation 
+### plot with no colors
+##
+# box plot for each cluster indicating intra-cluster diversity
+figure_5C_grayscalae<-ggplot(data = cluster.pt.df, aes(x=pt.type, y=max.intra.pt.clust)) + 
+  theme_bw()+
+  geom_boxplot(outlier.shape = NA)+
+  geom_point( colour="black",pch=21, size=3.5, position = position_jitter(w = 0.25, h = 0))+
+  theme(axis.text.x=element_text(hjust = 0, size = 15),
+        axis.text.y=element_text(hjust = 0, size = 15),
+        axis.title.x = element_text(size=20),
+        axis.title.y = element_text(size=20)) +
+  labs( x ="Isolate category", y = "Maximum intra-patient SNV distance") +
+  scale_y_continuous(trans='pseudo_log', breaks=c(0, 1, 10, 100,200)) +
+  labs(tag='C')+
+  annotate("label", x = 1.5, y = 150, label = "p-value: < 0.03",size =8)
+
+
+# 3 part figure
+pdf('../../../../../../Desktop/figure_5ABC.pdf')
+grid.arrange(cluster.diversity.plot,mut.freq.plot, ncol=1)
+figure_5C_grayscalae
+dev.off()
+```
+
+
+#### Duration of clusters
+-first patient
+-last patient
+
+```{r}
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+clust.duration<-sapply(unique(cluster.pt.df$mlst_clust),FUN=function(clust.id){
+
+#clust.df
+  clust.df<-cluster.pt.df[as.vector(cluster.pt.df$mlst_clust)==clust.id,]
+  
+  #first patient to be positive in the cluster
+  first.pt.pos<-unique(clust.df$patient.id[clust.df$culture.date== min(clust.df$culture.date)])[1]
+  
+  first.pt.date<-min(clust.df$culture.date[clust.df$patient.id == first.pt.pos])
+  
+  # last day another patient is positive in the cluster
+  last.pt.date<-max(clust.df$culture.date[clust.df$patient.id != first.pt.pos])
+
+  
+  duration<-last.pt.date-first.pt.date
+  return(duration)
+})
+
+```
+
+
+
+#### Figure 5: Overlap violin plots
+
+A.	Violin plot with spatiotemporal exposure in ltach, floor and room compared to null distribution
+B.	Violin plot with sequential exposure in ltach, floor and room compared to null distribution  
+
+-single patient has room overlap but no spatiotemporal  > 70 days  
+
+```{r}
+
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & as.numeric(culture.dates.df$cluster.id) !=1  & !(is.na(culture.dates.df$cluster.id)) &, ]
+
+
+# add cols for spatiotemporal and sequential overlap
+# add cols with overlap for convert isolates in the clusters 
+cluster.pt.df<-ClusterIsoOverlapCols(cluster.pt.df = cluster.pt.df,
+                            facility = facility.overlap, facility.seq = facility.overlap.sequential,
+                            floor = floor.overlap , floor.seq = floor.overlap.sequential,
+                            room = room.overlap, room.seq = room.overlap.sequential )
+
+
+# observed overlap across clusters: fraction of converts overlapping with putative donor
+observed.overlap.clusters<-SummarizeOverlapsAcrossClust(cluster.pt.df = cluster.pt.df)
+
+
+SummarizeOverlapsAcrossClust2(cluster.pt.df = cluster.pt.df)
+
+
+observed.overlap.clusters
+
+```
+
+
+
+#### generate permuted clusters for null distribution comparisons for overlap
+- match size of clusters  
+- and match number of patients in each cluster  
+
+```{r}
+
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# dataframe: unique cluster ids, n convert patients n index patients
+# to use for permuted clsuter distributions
+pt.clust.dist.df<-as.data.frame(t(sapply(unique(cluster.pt.df$mlst_clust), FUN=function(clust){
+  
+  # for each cluster get N converts, N index patients
+  n.conv.pt<-cluster.pt.df$convert.pt.count[cluster.pt.df$mlst_clust == clust][1]
+  n.ind.pt<-cluster.pt.df$index.pt.count[cluster.pt.df$mlst_clust == clust][1]
+  
+  clust.pt.dist<-c(n.conv.pt, n.ind.pt)
+  names(clust.pt.dist)<-c('n.conv.pt', 'n.ind.pt')
+  #
+  clust.pt.dist
+})))
+
+
+#isolates in each category naming patients who they are from
+# patients can be in both categories:
+
+# vector of index patients named by index isolates
+# these are based on every isoalte in the study
+# not just the isolates that do end up in clusters 
+all.ind.pt<-as.vector(culture.dates.df$patient.id)[as.vector(culture.dates.df$index.isolate) ==TRUE]
+names(all.ind.pt)<-as.vector(culture.dates.df$isolate.id)[as.vector(culture.dates.df$index.isolate) ==TRUE]
+
+# vector of of convert patients named by convert isolates
+all.conv.pt<-as.vector(culture.dates.df$patient.id)[as.vector(culture.dates.df$index.isolate) ==FALSE]
+names(all.conv.pt)<-as.vector(culture.dates.df$isolate.id)[as.vector(culture.dates.df$index.isolate) ==FALSE]
+
+#
+# 
+# Make permuted clusters: 
+# list of length observed clusters with random index and convert patients in the same distributions
+# output vectors are isoaltes representing the patient distribution in the observed clusters
+
+list.perm.clust.lists<-lapply(1:1000,FUN=function(x){
+  
+perm.clust<-sapply(1:nrow(pt.clust.dist.df), FUN=function(n.clust){
+
+# randomize order of index named by isolates
+  all.ind.pt<-sample(all.ind.pt, length(all.ind.pt))
+ 
+# randomize order of converts named by isolates
+  all.conv.pt<-sample(all.conv.pt, length(all.conv.pt))
+  
+  # pick number of unique index and converts from each category
+  # based on probability in the number of isolates belonging to each type of patient
+ 
+  # n converts to sample without replacement for the cluster
+  rand.conv.clust<-sample(x = names(table(all.conv.pt)), size = pt.clust.dist.df[n.clust,1], prob = table(all.conv.pt))
+  
+  # n index to sample without replacement for the clsuter
+  rand.ind.clust<-sample(x = names(table(all.ind.pt)), size = pt.clust.dist.df[n.clust,2], prob = table(all.ind.pt))
+  
+  # index and convert isolates naming patients in the current cluster
+  # pick random isolates for each cateogry and patients assigned for the cluster
+  
+  conv.isos<-unlist(sapply(rand.conv.clust, FUN=function(rand.pt){
+    
+    # pick random isolates from the patient for the convert category
+    rand.conv.iso<-names(all.conv.pt[all.conv.pt == rand.pt]) # names of isolates from that patient
+    
+    # randomize the order of the patients isoaltes again
+    rand.iso<-sample(rand.conv.iso,length(rand.conv.iso))[1] # pick one isolate from the patient
+    return(rand.iso)
+  }))
+  
+  index.isos<-unlist(sapply(rand.ind.clust, FUN=function(rand.pt){
+    
+    # pick random isolates from the patient for the convert category
+    rand.ind.iso<-names(all.ind.pt[all.ind.pt == rand.pt]) # names of isolates from that patient
+    
+    # randomize the order of the patients isoaltes again
+    rand.iso<-sample(rand.ind.iso,length(rand.ind.iso))[1] # pick one isolate from the patient
+    return(rand.iso)
+  }))
+  
+  # return index and convert isolates for the cluster
+  names(conv.isos)<-NULL
+  names(index.isos)<-NULL
+  
+  # return vector of permuted isolates for cluster
+  # this is isolates not patients but represents patient distribution in observed clusters
+  cluster.pts<-c(conv.isos, index.isos)
+  
+  # this id will be used for the cluster
+  mlst_clust<-rep(paste0('rand_',n.clust),length(cluster.pts))
+  
+  names(mlst_clust)<-cluster.pts
+  
+  # return isolates naming random cluster ID
+  return(mlst_clust)
+})
+  # return dataframe with 2 cols: random cluster id and isolates in the random cluster
+
+  perm.clust.df<-as.data.frame(cbind(unlist(perm.clust), names(unlist(perm.clust))))
+  colnames(perm.clust.df)<-c('mlst_clust', 'isolate.id')
+  
+  # add if the isolate is an index isolate or convert isolate to the dataframe
+ 
+  perm.clust.df$index.isolate<-FALSE
+  perm.clust.df$index.isolate[perm.clust.df$isolate.id %in% names(all.ind.pt)]<-TRUE
+  
+   # add the patient id for the isoalte
+  perm.clust.df$patient.id<-sapply(perm.clust.df$isolate.id,FUN=function(iso){
+    as.vector(culture.dates.df$patient.id)[as.vector(culture.dates.df$isolate.id) == iso]
+  })
+  
+  # add the patient.isolate.order for selecting first isoalte for overlap
+   perm.clust.df$patient.isolate.order<-sapply(perm.clust.df$isolate.id,FUN=function(iso){
+    as.vector(culture.dates.df$patient.isolate.order)[as.vector(culture.dates.df$isolate.id) == iso]
+  })
+  
+  return(perm.clust.df)
+  
+})
+
+names(list.perm.clust.lists)<-paste0('perm_',1:1000)
+
+
+```
+
+#### Calculate overlap in permuted clusters
+-for each permutation
+-for each random cluster
+-count number of convert patients wtih overlap at each location 
+-output: dataframe: nrows=clusters, ncols= permutations, cells indicate fraction of converts with overlap
+
+```{r}
+
+
+
+
+perm.ol.df<-PermutedClustOverlaps(list.perm.clust.dfs = list.perm.clust.lists,
+                                 facility = facility.overlap,
+                             facility.seq = facility.overlap.sequential,
+                                    floor = floor.overlap ,
+                                floor.seq = floor.overlap.sequential,
+                                     room = room.overlap,
+                                 room.seq = room.overlap.sequential )
+
+
+```
+
+
+#### Calculate p-values for permuted overlaps
+
+```{r}
+
+#calculate p-values
+
+print('spatiotemporal overlap pvalues')   
+# facility
+perm_props<-perm.ol.df$observed.facility
+prop<-observed.overlap.clusters[1]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+
+# floor
+perm_props<-perm.ol.df$observed.floor
+prop<-observed.overlap.clusters[2]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+
+# room 
+perm_props<-perm.ol.df$observed.room
+prop<-observed.overlap.clusters[3]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+ 
+print('sequential overlap pvalues')   
+
+# facility
+perm_props<-perm.ol.df$observed.seq.facility
+prop<-observed.overlap.clusters[4]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+
+# floor
+perm_props<-perm.ol.df$observed.seq.floor
+prop<-observed.overlap.clusters[5]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+
+# room 
+perm_props<-perm.ol.df$observed.seq.room
+prop<-observed.overlap.clusters[6]
+nperm<-1000
+
+(sum(abs(perm_props) > abs(prop)) + 1) / (length(perm_props) + 1)
+ 
+
+```
+
+
+
+#### Make Violin plot with permuted and observed overlap distributions
+
+
+```{r}
+# overlap in observed clusters
+observed.melt<-melt(t(as.data.frame(observed.overlap.clusters)))
+observed.melt<-observed.melt[,2:3]
+colnames(observed.melt)<-c('variable','value')
+# overlap in permuted clusters
+
+perm.ol.df.melt<-melt(perm.ol.df)
+
+ggplot(data=perm.ol.df.melt, aes(x=variable, y=value, fill=variable)) +
+  geom_violin(width=4, adjust=2)+
+  facet_grid(~ variable) +
+  geom_boxplot(width=0.5, color="grey")+
+  scale_fill_manual(values=c(wes_palette(3, name="GrandBudapest1"),wes_palette(3, name="GrandBudapest2")),labels = c("Spatiotemporal LTACH", "Spatiotemporal Floor",'Spatiotemporal Room','Sequential LTACH', 'Sequential Floor', 'Sequential Room'))+
+  theme_bw()+
+  geom_point(data=observed.melt, aes(x=variable, y=value), pch=17, size=8, color='black')+
+  scale_color_manual(labels='Observed Clusters')+
+  scale_y_continuous(limits = c(0, 1), breaks=seq(0,1,by=.2)) +
+  theme(axis.text.x=element_blank(),axis.text.y=element_text(size=12)) +
+  labs( x ="Exposure location", y = "Fraction of acquisitions among patients \n exposed to donor in cluster",fill='Exposure location', color='Observed \n transmission clusters')+
+  scale_x_discrete(labels= c('Spatiotemporal \n Facility',
+'Spatiotemporal \n Floor',
+'Spatiotemporal \n Room',
+'Sequential \n Facility',
+'Sequential \n Floor',
+'Sequential \n room'))
+
+# overlap in observed clusters
+observed.melt<-melt(t(as.data.frame(observed.overlap.clusters)))
+observed.melt<-observed.melt[,2:3]
+colnames(observed.melt)<-c('variable','value')
+# overlap in permuted clusters
+
+perm.ol.df.melt<-melt(perm.ol.df)
+
+
+perm.ol.df.melt$variable<-sub('observed.','',perm.ol.df.melt$variable)
+observed.melt$variable<-sub('observed.','',observed.melt$variable)
+perm.ol.df.melt$variable<-sub('seq.','sequential ',perm.ol.df.melt$variable)
+observed.melt$variable<-sub('seq.','sequential ',observed.melt$variable)
+
+# capitalize for plotting
+perm.ol.df.melt$variable<-str_to_title(string = perm.ol.df.melt$variable)
+observed.melt$variable<-str_to_title(string=observed.melt$variable)
+
+ggplot(data=perm.ol.df.melt, aes(x=variable, y=value)) +
+  geom_violin( width = 1, adjust=6)+
+  geom_boxplot(width=.25, color="grey")+
+  theme_classic()+
+  geom_point(data=observed.melt, aes(x=variable, y=value), pch=8, size=5, color='black')+
+  scale_color_manual(labels='Observed Clusters')+
+  scale_y_continuous(limits = c(0, 1), breaks=seq(0,1,by=.2)) +
+  theme(axis.text.y=element_text(size=15),
+        axis.text.x=element_text(size=15,angle = 90),
+        axis.title.y = element_text(size=20),
+        axis.title.x = element_text(size=20)) +
+  labs( x ="Exposure location", y = "Fraction of acquisitions")
+
+
+ 
+ 
+
+
+```
+
+
+
+#### Figure 6: Plot Floor traces for all transmisison clusters indicating isolate that makes them included in the cluster
+-categorize clusters summary of clusters where each of the following happen at least 1 time:
+-For figure 6 examples of cluster types:
+-missing index
+-missing index with ICU exposure
+-spatiotemporal overlap single index
+-no spatiotemporal overlap
+-and supplemental data (all clusters)
+
+```{r}
+
+# observed clsuters
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# plot bed traces for all observed clusters that are actual clusters with >1 patient and >=1 convert
+
+# genrate plotting DFs for trace plots
+
+# list of all clusters formatted for plotting the traces
+cluster.trace.plot.dfs<-VecDfPlotClusterFloorTrace(facility.trace = trace.list$facility.trace,
+                                                      floor.trace = trace.list$floor.trace,
+                                                 culture.dates.df =  cluster.pt.df)
+
+
+# get list of dfs with positive and negative surveillance data for each cluster member
+cluster.trace.surv.plot.df<-VecClusterPosNegSurvDates(facility.trace =trace.list$facility.trace, culture.dates.df = cluster.pt.df)
+
+```
+
+
+#### Generate overlap within each cluster : number of converts with overlap at location
+
+
+```{r}
+
+# df with real clusters including overlap by isolate
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# add cols for spatiotemporal and sequential overlap
+# add cols with overlap for convert isolates in the clusters 
+cluster.pt.df<-ClusterIsoOverlapCols(cluster.pt.df = cluster.pt.df,
+                            facility = facility.overlap, facility.seq = facility.overlap.sequential,
+                            floor = floor.overlap , floor.seq = floor.overlap.sequential,
+                            room = room.overlap, room.seq = room.overlap.sequential )
+
+
+# by cluster number of converts with overlap
+# converts are patients hwo have convert isolates in the clustetr
+
+# spatiotemporal
+facility.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="facility.overlap")
+floor.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="floor.overlap")
+room.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="room.overlap")
+
+# sequential 
+seq.facility.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="facility.overlap.seq", type='seq')
+seq.floor.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="floor.overlap.seq", type='seq')
+seq.room.ol.by.cluster<-SummarizeOverlapInClust(cluster.pt.df = cluster.pt.df, location="room.overlap.seq", type='seq')
+
+
+
+# cluster by convert overlap df 
+cluster.by.conv.ol.count.df<-cbind(facility.ol.by.cluster,floor.ol.by.cluster,room.ol.by.cluster,seq.facility.ol.by.cluster,seq.floor.ol.by.cluster,seq.room.ol.by.cluster)
+
+
+```
+
+
+# plot the cluster traces for each cluster  
+
+```{r}
+
+# df with real clusters including overlap by isolate
+# subset for clusters with putative transmission links in the LTACH in them
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# add cols for spatiotemporal and sequential overlap
+# add cols with overlap for convert isolates in the clusters 
+cluster.pt.df<-ClusterIsoOverlapCols(cluster.pt.df = cluster.pt.df,
+                            facility = facility.overlap, facility.seq = facility.overlap.sequential,
+                            floor = floor.overlap , floor.seq = floor.overlap.sequential,
+                            room = room.overlap, room.seq = room.overlap.sequential )
+
+
+
+#pdf("../../../../../../Desktop/2020-08-28_cluster_manuscript_figs/2020-08-29_all_cluster_trace_plots.pdf")
+
+for(clust.id in as.vector(unique(cluster.pt.df$mlst_clust))){
+  
+
+  # colors for culture and isolates in cluster
+  color.vals<-c('1.25'='blue','1.5'='red','1.6'='yellow')
+  
+  # colors for location
+  floor.colors<-c('0'='white',
+                 '1'= wes_palettes$IsleofDogs1[1],
+                 '2'= wes_palettes$IsleofDogs1[2],
+                 '3'= wes_palettes$IsleofDogs1[3],
+                 '4'= wes_palettes$Moonrise3[2],
+                 '5'= wes_palettes$FantasticFox1[2],
+                 '6'= wes_palettes$FantasticFox1[3])
+
+
+current.cluster<-cluster.trace.plot.dfs[[clust.id]]
+
+if(is.null(current.cluster)){
+  print('missing')
+  print(clust.id)
+  #stop()
+} else {
+  
+
+# cluster type
+cluster.cat<-as.vector(cluster.pt.df$cluster.category)[as.vector(cluster.pt.df$mlst_clust) == clust.id][1]
+
+# converts with floor overlap
+clust.floor.ol<-cluster.by.conv.ol.count.df[rownames(cluster.by.conv.ol.count.df) == clust.id, "floor.ol.by.cluster"]
+# converts with room overlap
+clust.room.ol<-cluster.by.conv.ol.count.df[rownames(cluster.by.conv.ol.count.df) == clust.id, "room.ol.by.cluster"]
+# converts with sequential room overlap
+seq.clust.room.ol<-cluster.by.conv.ol.count.df[rownames(cluster.by.conv.ol.count.df) == clust.id, "seq.room.ol.by.cluster"]
+
+
+# color vector for making facets indicate index vs convert
+
+
+
+# plotting df
+cluster.surv.df<-cluster.trace.surv.plot.df[[clust.id]]
+
+# max intra patient intra cluster dist
+max.clust.intra.pt<-as.vector(cluster.pt.df$max.intra.pt.clust)[as.vector(cluster.pt.df$mlst_clust) == clust.id][1]
+
+# max intra cluster dist
+max.clust.dist<-as.vector(cluster.pt.df$max.in.clust.dist)[as.vector(cluster.pt.df$mlst_clust) == clust.id][1]
+
+# susbet culture dates df for only isolates in the cluster
+cluster.isolate.df<-cluster.pt.df[as.vector(cluster.pt.df$mlst_clust) == clust.id, ]
+
+cluster.isolate.df$date<-cluster.isolate.df$trace.format.culture.date
+cluster.isolate.df.plot<-cluster.isolate.df[,c('patient.id','date', 'isolate.id')]
+cluster.isolate.df.plot$culture<-1.6
+cluster.surv.df$isolate.id<-NA
+    
+    
+cluster.surv.df<-rbind(cluster.surv.df, cluster.isolate.df.plot)
+
+
+print(ggplot() +
+            theme_bw()+
+          theme(axis.text.y=element_text(size=3))+
+            xlab("Bi-weekly period") +
+            ylab("Patient")+
+            ggtitle(paste0('Cluster: ',clust.id,'\n','Transmission Route: '))+
+
+            # add in location data
+              geom_point(data=current.cluster, aes(y=factor(patient.id), x=date, group=factor(patient.id),color=factor(floors)), pch=15,   size =1.5)+
+            guides(colour=guide_legend(title="Floor location"))+
+  scale_color_manual(values=floor.colors)+
+            scale_x_continuous(breaks=seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14), labels=seq(1,length(seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14)),by=1))+
+  
+            
+            # add in culture data
+            geom_point(data=cluster.surv.df, aes(y=factor(patient.id), x=date, group=factor(patient.id),fill=factor(culture)), pch=21,  colour='black', size = 1)+
+            scale_fill_manual('culture', values = color.vals, labels=c('Negative', 'Positive: non-cluster isolate','Positive: cluster isolate')) +
+            guides(fill=guide_legend(title="Surveillance culture"))+
+              coord_fixed(ratio=6)
+
+
+
+
+) # end print
+
+} # plot the trace for the cluster
+} # end else
+
+#dev.off()
+
+
+
+```
+
+
+
+#### Define cluster categories for summary across clusters: updated 9/08/2020
+- all criteria must be imposed at the level of the isolate rather than patient since patients with different isolates in other clusters put them into different categories.  
+
+-1) Patient-to-patient transmission - index first and overlap explanations for all
+-2) Missing intermediate - index first, but lacking overlap explanation for at least one convert
+-3) False negative index - do not require index patient at all and index not first, but overlap explanations for all but one csonvert (allow one freebee to account for false negative)
+-4) Multi-colonized index - index first to test positive for any isolate but not with the isolate that puts them in the cluster, and overlap explanations for all
+-5) Missing source - Catch all for other cases, which would be where index is not first and there is lack of overlap
+
+```{r}
+# df with real clusters including overlap by isolate
+# subset for clusters with putative transmission links in the LTACH in them
+# must have a convert
+# not cluster 1
+# at least 2 patients
+
+cluster.pt.df<-culture.dates.df[culture.dates.df$isolate.id %in% culture.isolate.id & culture.dates.df$cluster.id !=1 & culture.dates.df$clust.pt.count >1 & !(is.na(culture.dates.df$clust.pt.count)) & !(is.na(culture.dates.df$cluster.id)) & culture.dates.df$convert.pt.count >0, ]
+
+
+# add cols for spatiotemporal and sequential overlap
+# add cols with overlap for convert isolates in the clusters 
+cluster.pt.df<-ClusterIsoOverlapCols(cluster.pt.df = cluster.pt.df,
+                                     facility = facility.overlap, facility.seq = facility.overlap.sequential,
+                                     floor = floor.overlap , floor.seq = floor.overlap.sequential,
+                                     room = room.overlap, room.seq = room.overlap.sequential )
+
+```
+
+#### -1) Patient-to-patient transmission - index first and overlap explanations for all
+- true index patient must be first  
+- every convert (by isolate, e.g. index with convert isolates have overlap) has overlap explaination 
+
+```{r}
+#-1) Patient-to-patient transmission - index first and overlap explanations for all
+# all index before converts
+# all converts have facility overlap
+
+pt.2.pt.trans<-sapply(unique(cluster.pt.df$mlst_clust), FUN=function(clust){
+  
+  # subset for current cluster
+  current.df<-cluster.pt.df[cluster.pt.df$mlst_clust == clust, ]
+  # subset for first isoalte that puts patients in the cluster
+current.df<-current.df[order(current.df$patient.id, (current.df$patient.isolate.order)), ] # order by isolate order for the patient
+  current.df<-current.df[ !duplicated(current.df$patient.id), ] # non-duplicated patient id
+  
+  # all convert isolates are after index (logical)
+  
+  # first index isolate date
+  first.index.date<-min(current.df$first.day.in.study[current.df$index.isolate == TRUE])
+  
+  # all converts that are at or after the first index isolate in the study
+  all.conv.after.index<-sum(current.df$last.isolate.neg.date[as.vector(current.df$index.isolate == FALSE & current.df$is.index.pt == FALSE)] >= first.index.date)
+  
+  # all convert isolates in the cluster from convert patients that have overlap
+  # logical, length of isolates in the cluster
+  all.conv.overlap<- sum(current.df$facility.overlap >0 & !(is.na(current.df$facility.overlap)) & current.df$is.index.pt == FALSE)
+  
+  #total convert isolates from convert patients in the cluster
+  total.conv.isolates<-sum(as.vector(current.df$is.index.pt == FALSE))
+  
+  # total converts with overlap = total converts and all converts after index
+  (all.conv.overlap == total.conv.isolates) & all.conv.after.index
+  
+})
+names(pt.2.pt.trans)<-unique(cluster.pt.df$mlst_clust)
+
+```
+
+
+#### -2) Missing intermediate - index first, but lacking overlap explanation for at least one convert
+
+```{r}
+
+#-2) Missing intermediate - index first, but lacking overlap explanation for at least one convert
+# all index before converts
+# not all converts have facility overlap
+
+missing.int<-sapply(unique(cluster.pt.df$mlst_clust), FUN=function(clust){
+  
+    # subset for current cluster
+  current.df<-cluster.pt.df[cluster.pt.df$mlst_clust == clust, ]
+  # subset for first isoalte that puts patients in the cluster
+current.df<-current.df[order(current.df$patient.id, (current.df$patient.isolate.order)), ] # order by isolate order for the patient
+  current.df<-current.df[ !duplicated(current.df$patient.id), ] # non-duplicated patient id
+  
+  # all convert isolates are after index (logical)
+  
+  # first index isolate date
+  first.index.date<-min(current.df$first.day.in.study[current.df$index.isolate == TRUE])
+  
+  # all converts that are at or after the first index isolate in the study
+  all.conv.after.index<-sum(current.df$last.isolate.neg.date[as.vector(current.df$index.isolate == FALSE & current.df$is.index.pt == FALSE)] >= first.index.date)
+  
+  # all convert isolates in the cluster from convert patients that have overlap
+  # logical, length of isolates in the cluster
+  all.conv.overlap<- sum(current.df$facility.overlap >0 & !(is.na(current.df$facility.overlap)) & current.df$is.index.pt == FALSE)
+  
+  #total convert isolates from convert patients in the cluster
+  total.conv.isolates<-sum(as.vector(current.df$is.index.pt == FALSE))
+  
+    # Lacking overlap for at least 1 convert.
+  (all.conv.overlap < total.conv.isolates) & all.conv.after.index
+  
+})
+names(missing.int)<-unique(cluster.pt.df$mlst_clust)
+
+
+```
+
+#### #-3) False negative index - index not first (either no index or index is not first in the cluster to be positive), but overlap explanations for all but one convert (allow one freebee to account for false negative) 
+
+
+```{r}
+
+#-3) False negative index - index not first, but overlap explanations for all but one convert (allow one freebee to account for false negative)
+# index is not first positive patient
+# all except 1 convert have facility overlap
+
+false.neg.ind<-sapply(unique(cluster.pt.df$mlst_clust), FUN=function(clust){
+  
+    # subset for current cluster
+  current.df<-cluster.pt.df[cluster.pt.df$mlst_clust == clust, ]
+  # subset for first isoalte that puts patients in the cluster
+current.df<-current.df[order(current.df$patient.id, (current.df$patient.isolate.order)), ] # order by isolate order for the patient
+  current.df<-current.df[ !duplicated(current.df$patient.id), ] # non-duplicated patient id
+  
+  # all convert isolates are after index (logical)
+  
+  # first index isolate date
+  first.index.date<-min(current.df$first.day.in.study[current.df$index.isolate == TRUE])
+  
+  if(is.na(first.index.date)){
+    # if no index isolate in the cluster, make first convert isolate the "index"
+    no.index.pts<-TRUE
+  } else {
+    no.index.pts<-FALSE
+    #there are index patients in the cluster
+    
+    # all converts that are at or after the first index isolate in the study
+  all.conv.after.index<-sum(current.df$last.isolate.neg.date[as.vector(current.df$index.isolate == FALSE & current.df$is.index.pt == FALSE)] >= first.index.date)
+    
+  } # end else
+  
+  
+  # all convert isolates in the cluster from convert patients that have overlap
+  # logical, length of isolates in the cluster
+  all.conv.overlap<- sum(current.df$facility.overlap >0 & !(is.na(current.df$facility.overlap)) & current.df$is.index.pt == FALSE)
+  
+  #total convert isolates from convert patients in the cluster
+  total.conv.isolates<-sum(as.vector(current.df$is.index.pt == FALSE))
+  
+  # index not first (either no index or index is not first in the cluster to be positive), but overlap explanations for all but one convert (allow one freebee to account for false negative) 
+
+  all.conv.overlap == total.conv.isolates-1 & (no.index.pts | all.conv.after.index < total.conv.isolates)
+  
+  
+})
+names(false.neg.ind)<-unique(cluster.pt.df$mlst_clust)
+
+```
+
+#### #-4) Multi-colonized index - index first (but not with the isolate that puts them in the cluster) and overlap explanations for all except 1 convert
+-index isolate is first from index patient in the cluster but not isolate in the clsuter  
+-index isolate in the cluster is NOT first  
+-all converts have overlap
+-all converts are after index isolate that is not in the cluster  
+-all converts are not after index isolate that is in the cluster  
+
+```{r}
+#-4) Multi-colonized index - index first (but not necessarily with the isolate that puts them in the cluster) and overlap explanations for all
+# index positive for different isoalte not in cluster before all converts
+# facility overlap for all converts 
+
+mult.col.ind<-sapply(unique(cluster.pt.df$mlst_clust), FUN=function(clust){
+  # subset for current cluster
+current.df<-cluster.pt.df[cluster.pt.df$mlst_clust == clust, ]
+# subset for first isoalte that puts patients in the cluster
+current.df<-current.df[order(current.df$patient.id, (current.df$patient.isolate.order)), ] # order by isolate order for the patient
+current.df<-current.df[ !duplicated(current.df$patient.id), ] # non-duplicated patient id
+  
+# if no index patient in cluster, cant have multiply colonized index, rerturn 
+if(sum(current.df$is.index.pt==TRUE)==0){
+  
+  FALSE # no index patient in the cluster
+  
+} else {
+  
+# date of first index patient isolate from any index patient in the cluster
+min.any.index.date<-min(current.df$first.patient.pos.date[current.df$is.index.pt ==TRUE])
+
+  # first index isolate date
+  first.index.date<-min(current.df$first.day.in.study[current.df$index.isolate == TRUE])
+
+
+
+# Number of convert patients who are positive after the index is positive for any isolate
+conv.after.any.index<-sum(current.df$last.isolate.neg.date[as.vector(current.df$index.isolate == FALSE & current.df$is.index.pt == FALSE)] >= min.any.index.date)
+
+  # all converts that are at or after the first index isolate in the study
+
+  all.conv.after.index<-sum(current.df$last.isolate.neg.date[as.vector(current.df$index.isolate == FALSE & current.df$is.index.pt == FALSE)] >= first.index.date)
+  
+  # all convert isolates in the cluster from convert patients that have overlap
+  # logical, length of isolates in the cluster
+  all.conv.overlap<- sum(current.df$facility.overlap >0 & !(is.na(current.df$facility.overlap)) & current.df$is.index.pt == FALSE)
+  
+  #total convert isolates from convert patients in the cluster
+  total.conv.isolates<-sum(as.vector(current.df$is.index.pt == FALSE))
+
+    #  all converts are converts after any index 
+    # all converts are not after the index in the cluster
+    # all converts with overlap -1 is the same as number of converts in the cluster
+ conv.after.any.index > all.conv.after.index & all.conv.overlap > total.conv.isolates-1
+  
+
+} # end else
+
+}) # end sapply
+  
+
+names(mult.col.ind)<-unique(cluster.pt.df$mlst_clust)
+
+```
+
+#### #-5) Missing source - Catch all for other cases, which would be where index is not first and there is lack of overlap of >1 convert
+
+```{r}
+#-5) Missing source - Catch all for other cases, which would be where index is not first and there is lack of overlap
+# at least one convert positive before index and more than 1 convert lacks facility overlap
+# or no index patients
+all.clust.cat<-(pt.2.pt.trans| missing.int | false.neg.ind| mult.col.ind)
+names(all.clust.cat)<-names(pt.2.pt.trans)
+
+
+index.pt.count.clusters<-sapply(names(all.clust.cat), FUN=function(x){
+  
+  cluster.pt.df$index.pt.count[cluster.pt.df$mlst_clust == x][1]
+  
+})
+
+
+```
+
+#### Summarize all cluster categories
+-From hand-currated cluster categories reviewed with Evan 9/23/2020
+
+```{r}
+
+# Summarize all cluster categories
+table(currated.clust.df$category)
+
+
+```
+
+
+#### Hand pick specific example clusters for figure 7:
+-A) Patient-to-patient transmission - index first and overlap explanations for all
+-B) Missing intermediate - index first, but lacking overlap explanation for at least one convert
+-C) False negative index - index not first, but overlap explanations for all but one convert (allow one freebee to account for false negative)
+-D) Multi-colonized index - index first (but not necessarily with the isolate that puts them in the cluster) and overlap explanations for all
+-E) Missing source - Catch all for other cases, which would be where index is not first and there is lack of overlap
+
+
+
+######-7A: lapse in cohorting 258_242
+######-7B: False negative surveillance 258_178
+######-7C: Unidentified intermediate source 258_137
+######-7D: Transmission outside of cohort location 258_136
+######-7E: Transmission outside of facility 258_108
+
+
+```{r}
+
+example.clusters<-c('258_242','258_178','258_137', '258_136', '258_108')
+cluster.types<-c('Lapse in cohorting','False negative surveillance','Unidentified intermediate source','Transmission outside of cohort location','Transmission outside of facility')
+names(cluster.types)<-example.clusters
+
+
+
+pdf('../../../../../../Desktop/2020-06-17_figure_7_clusters.pdf')
+
+for(clust.id in names(cluster.types)){
+  
+ 
+  # type of cluster for title in plot
+  cluster.type<-cluster.types[names(cluster.types) == clust.id]
+
+current.cluster<-cluster.trace.plot.dfs[[clust.id]]
+
+# plotting df
+cluster.surv.df<-cluster.trace.surv.plot.df[[clust.id]]
+
+
+# susbet culture dates df for only isolates in the cluster
+cluster.isolate.df<-cluster.pt.df[as.vector(cluster.pt.df$mlst_clust) == clust.id, ]
+
+cluster.isolate.df$date<-cluster.isolate.df$trace.format.culture.date
+cluster.isolate.df.plot<-cluster.isolate.df[,c('patient.id','date', 'isolate.id')]
+cluster.isolate.df.plot$culture<-1.6
+cluster.surv.df$isolate.id<-NA
+    
+    
+cluster.surv.df<-rbind(cluster.surv.df, cluster.isolate.df.plot)
+
+
+print(ggplot() +
+            theme_bw()+         
+  theme(axis.text.y=element_text(size=3))+
+            xlab("Bi-weekly period") +
+            ylab("Patient")+
+            
+
+            # add in location data
+              geom_point(data=current.cluster, aes(y=factor(patient.id), x=date, group=factor(patient.id),color=factor(floors)), pch=15,   size =1.5)+
+            guides(colour=guide_legend(title="Floor location"))+
+  scale_color_manual(values=floor.colors)+
+            scale_x_continuous(breaks=seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14), labels=seq(1,length(seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14)),by=1))+
+  
+            # add in culture data
+            geom_point(data=cluster.surv.df, aes(y=factor(patient.id), x=date, group=factor(patient.id),fill=factor(culture)), pch=21,  colour='black', size = 1)+
+            scale_fill_manual('culture', values = color.vals, labels=c('Negative', 'Positive: non-cluster isolate','Positive: cluster isolate')) +
+            guides(fill=guide_legend(title="Surveillance culture"))+
+              coord_fixed(ratio=6)+
+    ggtitle(cluster.type))
+
+  
+  
+} # end for each example cluster
+
+dev.off()
+
+
+
+
+
+
+
+
+```
+
+
+#### Plot all cluster traces with indication of what type of cluster they are
+9/26/2020
+-hand curated w/Evan to categorize clusters.
+
+
+```{r}
+currated.clust.categories<-all.clust.categories
+
+currated.clust.categories[as.numeric(currated.clust.df$cluster.page)[currated.clust.df$category == "patient to patient"]]<-"patient to patient"
+
+currated.clust.categories[as.numeric(currated.clust.df$cluster.page)[currated.clust.df$category == "missing intermediate" ]]<-"missing intermediate" 
+
+currated.clust.categories[as.numeric(currated.clust.df$cluster.page)[currated.clust.df$category == "false negative index" ]]<-"false negative index"
+
+currated.clust.categories[as.numeric(currated.clust.df$cluster.page)[currated.clust.df$category == "multiply colonized index" ]]<-"multiply colonized index"
+
+currated.clust.categories[as.numeric(currated.clust.df$cluster.page)[currated.clust.df$category == "missing source" ]]<-"missing source"
+
+
+pdf("../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/2021-11-15_All_cluster_trace_categories.pdf")
+
+  for(clust.id in names(all.clust.categories)){
+  
+ 
+  # type of cluster for title in plot
+  cluster.type<-currated.clust.categories[names(all.clust.categories) == clust.id]
+
+current.cluster<-cluster.trace.plot.dfs[[clust.id]]
+
+# plotting df
+cluster.surv.df<-cluster.trace.surv.plot.df[[clust.id]]
+
+
+# susbet culture dates df for only isolates in the cluster
+cluster.isolate.df<-cluster.pt.df[as.vector(cluster.pt.df$mlst_clust) == clust.id, ]
+
+cluster.isolate.df$date<-cluster.isolate.df$trace.format.culture.date
+cluster.isolate.df.plot<-cluster.isolate.df[,c('patient.id','date', 'isolate.id')]
+cluster.isolate.df.plot$culture<-1.6
+cluster.surv.df$isolate.id<-NA
+    
+    
+cluster.surv.df<-rbind(cluster.surv.df, cluster.isolate.df.plot)
+
+cluster.title<-paste0(clust.id, ": " , cluster.type)
+
+print(ggplot() +
+            theme_bw()+         
+  theme(axis.text.y=element_text(size=3))+
+            xlab("Bi-weekly period") +
+            ylab("Patient")+
+            
+
+            # add in location data
+              geom_point(data=current.cluster, aes(y=factor(patient.id), x=date, group=factor(patient.id),color=factor(floors)), pch=15,   size =1.5)+
+            guides(colour=guide_legend(title="Floor location"))+
+  scale_color_manual(values=floor.colors,na.translate=FALSE)+
+            scale_x_continuous(breaks=seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14), labels=seq(1,length(seq(min(rownames(trace.list$facility.trace)),max(rownames(trace.list$facility.trace)), by=14)),by=1))+
+  
+            # add in culture data
+            geom_point(data=cluster.surv.df, aes(y=factor(patient.id), x=date, group=factor(patient.id),fill=factor(culture)), pch=21,  colour='black', size = 1)+
+            scale_fill_manual('culture', values = color.vals, labels=c('Negative', 'Positive: non-cluster isolate','Positive: cluster isolate')) +
+            guides(fill=guide_legend(title="Surveillance culture"))+
+              coord_fixed(ratio=6)+
+    ggtitle(cluster.title))
+
+
+} # end for each cluster
+
+dev.off()
+
+```
+
+#### double check clusters 34-35 with the same patients but different isolates
+```{r}
+
+
+clust.iso34_40<-names(all.mlst.sv.clusters$st.258.aln.file)[all.mlst.sv.clusters$st.258.aln.file %in% c(40)]
+
+cluster.isolate.df[cluster.isolate.df$isolate.id %in% clust.iso34_69, ]
+
+all.isolates.dist.mat[clust.iso34_69, clust.iso34_69]
+
+```
+
+#### 9/29: summarize patients with >1 MLST for Evan
+```{r}
+mlst.per.pt<-sapply(unique(culture.dates.df$patient.id), FUN=function(x){
+  current.df<-culture.dates.df[culture.dates.df$patient.id == x,]
+  
+  length(unique(current.df$mlst))
+})
+```
+
+
+# Lancet Microbe review analysis and figures
+## 10/7/21
+
+### Overlap between patients with same MLST across all MLSTs
+
+```{r}
+
+overlap.by.mlst<-sapply(names(all.mlst.align.lists), FUN=function(current.mlst){
+  
+  # for each MLST
+  current.list<-all.mlst.align.lists[[current.mlst]]
+  
+  
+  #get the names of isolates from that MLST
+  mlst.isolates<-colnames(current.list$snp.dist)
+  mlst.isolates<-mlst.isolates[!(mlst.isolates %in% c( "KPNIH1"))]
+  mlst.isolates<-mlst.isolates[!grepl("C",mlst.isolates)]
+  mlst.isolates<-mlst.isolates[!grepl("L",mlst.isolates)]
+  
+  
+  #subset facility overlap matrix for just those isolates
+  mlst.isolates<-mlst.isolates[mlst.isolates %in% colnames(facility.overlap)]
+  
+  isolate.with.overlap<-colSums(facility.overlap[mlst.isolates,mlst.isolates],na.rm=T)>1
+  #isolate overlap
+  #colSums >1 na.rm=T
+  
+  #return isolates with overlap
+  isolate.with.overlap[isolate.with.overlap>0]
+  
+})
+
+
+overlap.by.mlst<-unlist(overlap.by.mlst)
+
+#patients with MLST overlap
+unique(cluster.data.list$dna.pt.labels[names(cluster.data.list$dna.pt.labels) %in% names(overlap.by.mlst)])
+
+
+
+```
+
+
+## Analysis for revision
+-A.fraction of acquisitions uniquely assigned to the correct admission-positive patient at thresholds
+-B. Fraction of clusters with multiple index patients
+-5,10,20,30,40,50,100,200 SNV
+
+```{r}
+
+# DF
+#cluster.pt.df
+
+# convert isolates vector of convert isolates in clusters
+conv.isolate.clusters<-cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==FALSE & cluster.pt.df$is.index.pt==FALSE]
+
+
+SNVDistClustSummary<-function(cluster.pt.df,
+                              conv.isolate.vector,
+                              dist.mat,
+                              dist.thresh=10){
+  # returns named logical vector indicating if non-threshold-based cluster index patient is in SNV threshold based cluster defined by SNV distance alone.
+  # Args:
+  # 1. conv.isolate.vector: vector of convert isolate IDs for isolates in cluster.pt.df$isolate.id[cluster.pt.df$is.index.pt=FALSE]
+  # 2. dist.mat: all.isolates.dist.mat. MLST specific SNV distance matrix: 9999 = diifferent MLST, -1 = missing from alignment.
+  # 3. dist.thresh: numeric, current dist threshold
+  # 4. cluster.pt.df: df with info about SV clusters 
+  
+  orig.index.in.thresh.clsut<-sapply(conv.isolate.vector, FUN=function(ci.clust){   # for each convert isolate in isolate.vector
+    
+     # get cluster.id
+    current.clust.id<-cluster.pt.df$mlst_clust[cluster.pt.df$isolate.id==ci.clust]
+  
+    
+    # if no original index isolates original index count = 0
+    no.index.clusters<-unique(cluster.pt.df$mlst_clust[cluster.pt.df$index.pt.count==0])
+    
+    if(current.clust.id %in% no.index.clusters){
+      
+      return(0) # no index patients in original clusters
+      
+    }else {
+    
+      # get original index.isolate.id (s)
+    orig.index.isolates<-cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==TRUE & cluster.pt.df$mlst_clust==current.clust.id]
+    
+    # get original index.patient.id(s)
+    orig.index.pts<-as.vector(cluster.pt.df$patient.id[cluster.pt.df$isolate.id %in% orig.index.isolates])
+    
+    
+     #  subset SNV dist mat for convert isolate x index isolate(s), (row x col)
+    dist.sub<- dist.mat[rownames(dist.mat) == ci.clust, ]
+    
+    dist.sub<-dist.sub[dist.sub!=9999 & dist.sub !=-1] # remove uninformative values
+    
+    # subset for distance threshold
+    dist.sub<-dist.sub[dist.sub<=dist.thresh]
+  
+    # is the original index isolate in that list of isolates within the current threshold
+    thresh.clust.pts<-unique(as.vector(cluster.pt.df$patient.id)[cluster.pt.df$isolate.id %in% names(dist.sub)])
+   
+   
+    # number of index patients in original cluster who are also in threshold cluster 
+    # can be a number < or = to original clusterr
+    
+    number.orig.index.pt<-sum(unique(orig.index.pts) %in% unique(thresh.clust.pts))
+    
+   # if(ci.clust=='317'){
+   #    
+   #    print(ci.clust)
+   #    print(orig.index.pts)
+   #    print(thresh.clust.pts)
+   #    print(dist.sub)
+   #    print(number.orig.index.pt)
+   #    stop()
+   #    
+   #  }
+    
+  
+    return(number.orig.index.pt>0)
+  
+    } # end else there are index pts in the clsuter
+
+    
+  }) # end sapply
+  
+  return(orig.index.in.thresh.clsut)
+  
+}# End SNVDistClustSummary
+
+
+```
+
+# make table with original index patient counts by SNV thresholds
+
+```{r}
+
+thresh.10.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 10)
+
+thresh.20.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 20)
+
+thresh.30.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 30)
+
+thresh.40.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 40)
+
+thresh.50.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 50)
+
+thresh.60.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 60)
+
+thresh.70.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 70)
+
+thresh.80.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 80)
+
+thresh.90.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 90)
+
+thresh.100.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 100)
+
+thresh.110.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 110)
+
+thresh.120.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 120)
+
+thresh.200.sv.comparison<-SNVDistClustSummary(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 200)
+
+# make df with index patient count thresholds
+original.sv.index.pt.count<-cluster.pt.df$index.pt.count[cluster.pt.df$is.index.pt==FALSE]
+index.pt.count.thresholds<-cbind.data.frame(original.sv.index.pt.count,
+      thresh.10.sv.comparison,
+      thresh.20.sv.comparison,
+      thresh.30.sv.comparison,
+      thresh.40.sv.comparison,
+      thresh.50.sv.comparison,
+      thresh.60.sv.comparison,
+      thresh.70.sv.comparison,
+      thresh.80.sv.comparison,
+      thresh.90.sv.comparison,
+      thresh.100.sv.comparison,
+      thresh.110.sv.comparison,
+      thresh.120.sv.comparison,
+      thresh.200.sv.comparison)
+
+threshold.eval.cluster.pt.df<-cbind.data.frame(
+                                               cluster.pt.df[cluster.pt.df$is.index.pt==FALSE,],index.pt.count.thresholds
+                                    )
+
+
+write.csv(threshold.eval.cluster.pt.df,file = "2021-10-24_convert_isolates_by_threshold_clusters_with_same_index.csv")
+
+
+threshold.percent<-apply(X = index.pt.count.thresholds[,2:ncol(index.pt.count.thresholds)],MARGIN = 2,FUN = function(comp){
+  
+  
+  sum(comp>=1)/sum(index.pt.count.thresholds$original.sv.index.pt.count>=1)*100
+  
+})
+
+as.data.frame(round(threshold.percent[1:6],2))
+
+
+
+
+```
+
+
+### Summarize acquisition patients linked to original index patient
+-by patient not isolate
+```{r}
+
+# unique patient, cluster and 
+unique.pts.cluster<-threshold.eval.cluster.pt.df[!duplicated(threshold.eval.cluster.pt.df$patient.id,threshold.eval.cluster.pt.df$mlst_clust), ]
+
+index.pt.count.thresholds<-index.pt.count.thresholds[rownames(index.pt.count.thresholds) %in% unique.pts.cluster$isolate.id,]
+
+
+
+threshold.percent<-apply(X = index.pt.count.thresholds[,2:ncol(index.pt.count.thresholds)],MARGIN = 2,FUN = function(comp){
+  
+  
+  sum(comp>=1)/sum(index.pt.count.thresholds$original.sv.index.pt.count>=1)*100
+  
+})
+
+
+kable(as.data.frame(round(threshold.percent[1:6],2)))
+
+
+
+threshold.count<-apply(X = index.pt.count.thresholds[,2:ncol(index.pt.count.thresholds)],MARGIN = 2,FUN = function(comp){
+  
+  print(comp)
+  print(sum(comp>=1))
+  print(sum(index.pt.count.thresholds$original.sv.index.pt.count>=1))
+  sum(comp>=1)/sum(index.pt.count.thresholds$original.sv.index.pt.count>=1)*100
+  
+})
+
+
+```
+
+### Function to quantify uncertainty -e.g. new indexes that are also present in SNV distance based clusters
+
+```{r}
+
+
+SNVDistClustSummaryUncertainty<-function(cluster.pt.df,
+                              conv.isolate.vector,
+                              dist.mat,
+                              dist.thresh=10){
+  # returns named logical vector indicating if non-threshold-based cluster index patient is in SNV threshold based cluster defined by SNV distance alone.
+  # Args:
+  # 1. conv.isolate.vector: vector of convert isolate IDs for isolates in cluster.pt.df$isolate.id[cluster.pt.df$is.index.pt=FALSE]
+  # 2. dist.mat: all.isolates.dist.mat. MLST specific SNV distance matrix: 9999 = diifferent MLST, -1 = missing from alignment.
+  # 3. dist.thresh: numeric, current dist threshold
+  # 4. cluster.pt.df: df with info about SV clusters 
+  
+  orig.index.in.thresh.clsut<-sapply(conv.isolate.vector, FUN=function(ci.clust){   # for each convert isolate in isolate.vector
+    
+     # get cluster.id
+    current.clust.id<-cluster.pt.df$mlst_clust[cluster.pt.df$isolate.id==ci.clust]
+  
+    
+    # if no original index isolates original index count = 0
+    #no.index.clusters<-unique(cluster.pt.df$mlst_clust[cluster.pt.df$index.pt.count==0])
+    
+    #if(current.clust.id %in% no.index.clusters){
+      
+     # return(NA) # no index patients in original clusters
+      
+    #}else {
+    
+      # get original index.isolate.id (s) iin ANY cluster
+    orig.index.isolates<-cluster.pt.df$isolate.id[cluster.pt.df$index.isolate==TRUE]
+    
+    # get original index.patient.id(s) in ANY cluster
+    orig.index.pts<-as.vector(cluster.pt.df$patient.id[cluster.pt.df$isolate.id %in% orig.index.isolates])
+    
+    
+     #  subset SNV dist mat for convert isolate x index isolate(s), (row x col)
+    dist.sub<- dist.mat[rownames(dist.mat) == ci.clust, ]
+    
+    dist.sub<-dist.sub[dist.sub!=9999 & dist.sub !=-1] # remove uninformative values
+    
+    # subset for distance threshold
+    dist.sub<-dist.sub[dist.sub<=dist.thresh]
+  
+    # is the original index isolate in that list of isolates within the current threshold
+    thresh.clust.pts<-unique(as.vector(cluster.pt.df$patient.id)[cluster.pt.df$isolate.id %in% names(dist.sub)])
+   
+   
+    # number of index patients in original cluster who are also in threshold cluster 
+    # can be a number < or = to original clusterr
+    
+    number.orig.index.pt<-sum(unique(orig.index.pts) %in% unique(thresh.clust.pts))
+    
+   # if(ci.clust=='178'){
+   #    
+   #    print(ci.clust)
+   #    print(orig.index.pts)
+   #    print(thresh.clust.pts)
+   #    print(dist.sub)
+   #    print(number.orig.index.pt)
+   #    stop()
+   #    
+   #  }
+    
+  
+    #return total number of index patients in the cluster
+    return(number.orig.index.pt)
+  
+    #} # end else there are index pts in the clsuter
+
+    
+  }) # end sapply
+  
+  return(orig.index.in.thresh.clsut)
+  
+}# End SNVDistClustSummary
+
+thresh.10.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 10)
+
+
+
+
+thresh.10.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 10)
+
+thresh.20.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 20)
+
+thresh.30.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 30)
+
+thresh.40.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 40)
+
+thresh.50.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 50)
+
+thresh.60.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 60)
+
+thresh.70.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 70)
+
+thresh.80.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 80)
+
+thresh.90.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 90)
+
+thresh.100.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 100)
+
+thresh.110.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 110)
+
+thresh.120.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 120)
+
+thresh.200.sv.uncertainty<-SNVDistClustSummaryUncertainty(conv.isolate.vector = conv.isolate.clusters,
+                    cluster.pt.df = cluster.pt.df,
+                    dist.mat = all.isolates.dist.mat,
+                    dist.thresh = 200)
+
+
+
+
+# make df with index patient count thresholds
+original.sv.index.pt.count<-cluster.pt.df$index.pt.count[cluster.pt.df$is.index.pt==FALSE]
+#]& cluster.pt.df$index.pt.count>0]
+
+
+     thresh.10.sv.uncertainty<-thresh.10.sv.uncertainty[!(is.na(thresh.10.sv.uncertainty))]
+      thresh.20.sv.uncertainty<-thresh.20.sv.uncertainty[!(is.na(thresh.20.sv.uncertainty))]
+      thresh.30.sv.uncertainty<-thresh.30.sv.uncertainty[!(is.na(thresh.30.sv.uncertainty))]
+      thresh.40.sv.uncertainty<-thresh.40.sv.uncertainty[!(is.na(thresh.40.sv.uncertainty))]
+      thresh.50.sv.uncertainty<-thresh.50.sv.uncertainty[!(is.na(thresh.50.sv.uncertainty))]
+      thresh.60.sv.uncertainty<-thresh.60.sv.uncertainty[!(is.na(thresh.60.sv.uncertainty))]
+
+
+index.pt.count.thresholdsUncertainty<-cbind.data.frame(original.sv.index.pt.count,
+     thresh.10.sv.uncertainty,
+     thresh.20.sv.uncertainty,
+     thresh.30.sv.uncertainty,
+     thresh.40.sv.uncertainty,
+     thresh.50.sv.uncertainty,
+     thresh.60.sv.uncertainty)
+
+# subset to correspond to unique patients per cluster e.g. 1 isolate/cluster
+index.pt.count.thresholdsUncertainty<-index.pt.count.thresholdsUncertainty[rownames(index.pt.count.thresholdsUncertainty) %in% unique.pts.cluster$isolate.id, ]
+
+uncertainty.summary.df<-as.data.frame(summary(index.pt.count.thresholdsUncertainty))
+
+
+uncertainty.count<-apply(X = index.pt.count.thresholdsUncertainty[,1:ncol(index.pt.count.thresholdsUncertainty)],MARGIN = 2,FUN = function(comp){
+  
+  print(comp)
+  print('greater than 1')
+  print(sum(comp>=2))
+   print('zero')
+  print(sum(comp<1))
+   print('one')
+  print(sum(comp==1))
+  #print(sum(index.pt.count.thresholdsUncertainty$original.sv.index.pt.count>=2))
+  print(length(index.pt.count.thresholdsUncertainty$original.sv.index.pt.count))
+  #print(sum(comp>=2)/sum(index.pt.count.thresholdsUncertainty$original.sv.index.pt.count>=2)*100)
+  #sum(comp>=2)/sum(index.pt.count.thresholdsUncertainty$original.sv.index.pt.count>=2)*100
+  
+})
+
+
+
+
+uncertainty.df.melt<-melt(index.pt.count.thresholdsUncertainty)
+
+
+
+
+
+
+#threshold.percent<-as.data.frame(threshold.percent[1:6])
+#colnames(threshold.percent)<-c('percent')
+#threshold.percent$variable<-rownames(threshold.percent)
+#threshold.percent$variable<-sub( "thresh.",'',threshold.percent$variable)
+#threshold.percent$variable<-sub( ".sv.comparison",' SNV',threshold.percent$variable)
+
+
+
+
+uncertainty.df.melt$variable<-sub( "thresh.",'',uncertainty.df.melt$variable)
+uncertainty.df.melt$variable<-sub( ".sv.uncertainty",' SNV',uncertainty.df.melt$variable)
+uncertainty.df.melt$variable<-sub( "original.sv.index.pt.count",'Threshold-free',uncertainty.df.melt$variable)
+
+
+ggplot(data = uncertainty.df.melt, aes(x=variable, y=value)) + 
+  geom_violin(width=1, adjust=2)+
+  theme_bw()+
+  geom_boxplot(width=0.1, color="grey")+
+    geom_jitter(width=.1, height=0, size=.02)+
+  scale_y_continuous(limits = c(0, 30), breaks=seq(0,30,by=1)) +
+  theme(axis.text.y=element_text(size=15),
+        axis.text.x=element_text(size=15,angle = 90),
+        axis.title.y = element_text(size=20),
+        axis.title.x = element_text(size=20)) +
+  labs( x ="SNV Threshold", y = "Unique index patients \n linked to each acquisition patient")+
+   stat_summary(geom="text", fun="median", aes(label=sprintf("%1.1f", ..y..)),
+           position=position_nudge(x=0.2, y=.5), size=3)+
+  stat_summary(geom="text", fun="mean", aes(label=sprintf("%1.1f", ..y..)),
+           position=position_nudge(x=0.5, y=.5), size=3, color='red')
+
+
+
+
+
+```
+
+
+## Generate list of patients and clusters where patient is a convert but not tested before day 3  
+
+```{r}
+
+presumed.convert.df<-cluster.pt.df[cluster.pt.df$is.index.pt==FALSE & (cluster.pt.df$first.patient.pos.date-cluster.pt.df$first.day.in.study)>3 & is.na(cluster.pt.df$first.patient.neg.date),]
+
+presumed.convert.df$days_in_study_before_positive<-presumed.convert.df$first.patient.pos.date-presumed.convert.df$first.day.in.study
+
+
+presumed.convert.df<-presumed.convert.df[,c("patient.id",
+                                            "isolate.id",
+                                            "first.patient.neg.date",
+                                            "days_in_study_before_positive",
+                                            "mlst_clust",
+                                            "cluster.category",
+                                            "max.in.clust.dist",
+                                            "max.intra.pt.clust"),]
+
+presumed.convert.df$mutator_cluster<-presumed.convert.df$mlst_clust %in% mut.plot.clust
+write.csv(presumed.convert.df,file='../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/2021-11-12-converts_presumed_after_day_3.csv')
+
+
+length(unique(presumed.convert.df$patient.id))
+length(unique(presumed.convert.df$mlst_clust))
+
+```
+
+
+
+### Plot tree w/all isolates indicating hypermutators
+
+```{r}
+#unique(melt.mut.df$mlst_clust)
+
+# single alignment tre with mutators 
+
+mutator.df.tree<-cluster.pt.df[,c("isolate.id","mlst_clust")]
+
+mutator.df.tree$mutator_cluster<-mutator.df.tree$mlst_clust %in% mut.plot.clust
+mutator.df.tree$mutator_cluster[mutator.df.tree$mutator_cluster==TRUE]<-mutator.df.tree$mlst_clust[mutator.df.tree$mutator_cluster==TRUE]
+mutator.df.tree$mutator_cluster[mutator.df.tree$mutator_cluster==FALSE]<-NA
+mutator.df.tree$mutator_cluster<-as.factor(mutator.df.tree$mutator_cluster)
+
+#drop non cluster tips
+non.clust.tips<-cluster.data.list$tree$tip.label[!(cluster.data.list$tree$tip.label %in% mutator.df.tree$isolate.id)]
+
+
+mutator.df.tree$index.isolate<-mutator.df.tree$isolate.id %in% cluster.pt.df$isolate.id[cluster.pt.df$index.isolate]
+
+single.ref.tree<-drop.tip(phy = cluster.data.list$tree, tip=non.clust.tips)
+
+
+#pdf('../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/single_reference_tree_hypermutator_indicated.pdf')
+pdf('../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/2021-12-21_single_reference_tree_hypermutator_indicated_NJ_trees_with_branchlengths.pdf')
+  p<-ggtree(single.ref.tree,branch.length='none',type='c')  %<+% mutator.df.tree+
+    geom_tippoint(aes(color = mutator_cluster), size=1, alpha=0.25)+
+    geom_tiplab(offset = .9, hjust = .5, size=1)+
+    ggtitle('Single-reference phylogeny \n branch lengths removed')+ guides(color=guide_legend(title="Large SNV Clusters"))
+  
+    pp<-ggtree(single.ref.tree,layout = 'c')  %<+% mutator.df.tree+
+    geom_tippoint(aes(color = mutator_cluster), size=2, alpha=0.25)+
+    geom_tiplab(offset = .9, hjust = .5, size=1, align = TRUE)+
+    ggtitle('Single-reference phylogeny')+ 
+      guides(color=guide_legend(title="Large SNV Clusters"))
+  
+print(p)
+print(pp)
+
+
+# plot for each MLST
+  
+for(MLST in names(all.mlst.align.lists)){
+  
+  #numeric MLST
+  current.mlst<-sub('st.','',MLST)
+  current.mlst<-sub('.aln.file','',current.mlst)
+  
+  #current MLST info 
+  current.mlst.list<-all.mlst.align.lists[[MLST]]
+  
+  
+  # get tree
+  #current.tree<-current.mlst.list$pars.tree
+  current.tree<-current.mlst.list$nj.subtrees[[length(current.mlst.list$nj.subtrees)]]
+  #drop KPNIH1 because it is way too distant to see what is happening
+  #current.tree<-drop.tip(current.tree.first.iso, "KPNIH1",)
+  print(current.tree)
+  
+  mutator.df.tree.current<-mutator.df.tree[mutator.df.tree$isolate.id %in% current.tree$tip.label, ]
+  
+  
+ # mutate.cols<-c("grey","red")
+ # names(mutate.cols)<-c(FALSE,TRUE)
+  if(current.mlst %in% c(15,16,258)){
+    
+    print(mutator.df.tree.current$mutator_cluster)
+  #plot tree
+ p<- ggtree(current.tree, layout = 'c')  %<+% mutator.df.tree.current+
+    geom_tippoint(aes(color = mutator_cluster), size=2, alpha=0.25)+
+    geom_tiplab( size=1.5, align = TRUE)+
+    ggtitle(paste0(current.mlst)," phylogeny")+ 
+   guides(color=guide_legend(title="Large SNV Clusters"))
+ 
+print(p) 
+
+  } # end relevant MLST
+  
+  
+} # end for MLST
+
+
+  dev.off()
+
+
+
+```
+
+
+
+### Check that different MLSTs are >500 SNV apart.
+
+```{r}
+#cluster.data.list$snp.dist
+
+#cluster.data.list$MLST
+
+
+# min distance between member of the MLST and a member of a different MLST
+
+MLST.confirm<-cluster.data.list$MLST
+
+MLST.confirm[ names(MLST.confirm) %in% names(MLST.id.unknowns)]<-as.vector(MLST.id.unknowns)
+
+
+snp.dist.mlst<-cluster.data.list$snp.dist
+
+snp.dist.mlst<-snp.dist.mlst[names(MLST.confirm),names(MLST.confirm)]
+
+
+dist.between.mlst<-sapply(unique(MLST.confirm),FUN=function(unique.st){
+  
+  print(unique.st)
+  
+  current.st.isolates<-names(MLST.confirm)[as.vector(MLST.confirm)==unique.st]
+  
+  current.st.isolates<-current.st.isolates[!(is.na(current.st.isolates))]
+  
+  other.st.names<-colnames(snp.dist.mlst)[!(colnames(snp.dist.mlst) %in% as.character(current.st.isolates))]
+  
+
+   # if(unique.st=='Novel'){
+   # print(snp.dist.mlst[as.character(current.st.isolates), other.st.names])
+   #   min(snp.dist.mlst[as.character(current.st.isolates), other.st.names])
+   # } else {
+        min(snp.dist.mlst[as.character(current.st.isolates), other.st.names])
+
+
+   # }
+  
+
+  
+})
+# the 6 for novel is the NA, so another unassigned. everything else is >500.
+
+
+```
+
+
+### Number of core vs non core positions requested by reviewer
+
+```{r}
+
+var.pos.table<-sapply(1:length(all.mlst.align.lists), FUN=function(st.num){
+  
+  current.list<-all.mlst.align.lists[[st.num]]
+  
+  #current alignment
+  current.dna<-current.list$dna
+  
+  # remove the outgroups
+  problem.genomes<-c('CP014123','CP014004', 'CP015990.1','LS399318.1','KPNIH1',
+                     "GCA_002951635.1",'gi|661922017|gb|CP008827.1|')
+    
+    print(length(rownames(current.dna)))
+    dna<-current.dna[setdiff(row.names(current.dna), problem.genomes),]
+    dna<-dna[rownames(dna) %in% culture.dates.df$isolate.id, ] # make sure it is a study isolate
+    
+    #bad assemblies & wrong ST in ST258 alignment
+    
+    problem.genomes<-c("556","42","462","131","104","261","189","327","138","342","151","534","523","519","24","315","785","176", # st258
+                   "456", # st 15
+                   "40", "786", "15", "783", "581", "337", # st 13
+                   "214", "531", # st 874
+                   "420",'421')
+        dna<-dna[!(rownames(dna) %in% problem.genomes), ]
+        
+    
+        print(length(rownames(dna)))
+        
+   # if(st.num==6){
+      
+
+      #st258.genomes<-culture.dates.df$isolate.id[culture.dates.df$mlst=='258']
+      
+    
+      #dna<-cluster.data.list$dna #single ref alignment
+      
+       #dna<-dna[rownames(dna) %in% st258.genomes, ]
+        
+      
+        
+ # dna.var.pos <- apply(dna, 2, FUN = function(x) {
+  #  sum(x == x[1]) < nrow(dna)
+ # })
+  
+ # dna.var <- dna[, dna.var.pos]
+
+# print(unique(c(as.character(dna.var))))
+  
+#   dna_core_pos = apply(as.character(dna.var), 2, FUN = function(x){sum(x == '-' | x == 'n' | x == 'N') == 0})
+#   dna.var.core<-dna.var[,dna_core_pos]
+#   
+# 
+# out.vec<-c(length(dna.var),
+#   ncol(dna.var.core), ncol(dna.var)-ncol(dna.var.core))
+# names(out.vec)<-c('Variant positions',"Core variant positions", "difference")
+#                                
+#   out.vec
+#       
+#    
+#     }else {
+      
+       
+  dna.var.pos <- apply(dna, 2, FUN = function(x) {
+    sum(x == x[1]) < nrow(dna)
+  })
+  
+  dna.var <- dna[, dna.var.pos]
+
+ print(unique(c(as.character(dna.var))))
+  
+ 
+  #dna_core_pos = apply(as.character(dna.var), 2, FUN = function(x){sum(x == '-' | x == 'n' | x == 'N') == 0})
+  
+  #dna_core_pos = apply(as.character(dna.var), 2, FUN = function(x){sum( x == 'n' | x == 'N') == 0})
+  
+ 
+ dna_core_pos = apply(as.character(dna.var), 2, FUN = function(x){sum(x == '-') == 0})
+  
+ 
+  dna.var.core<-dna.var[,dna_core_pos]
+  
+
+out.vec<-c(ncol(dna.var),
+  ncol(dna.var.core), ncol(dna.var)-ncol(dna.var.core))
+names(out.vec)<-c('Variant positions',"Core variant positions", "difference")
+                               
+  out.vec
+   # }
+ 
+})
+
+
+colnames(var.pos.table)<-sub(".aln.file",'',names(all.mlst.align.lists))
+var.pos.table<-as.data.frame(var.pos.table)
+
+write.csv(var.pos.table,"../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/2021-11-19_Dash_only_core_vs_non-core_positions.csv")
+
+#write.csv(var.pos.table,"../../Dropbox (University of Michigan)/Rush KPC LTACH work/LTACH C  transmission cluster manuscript/Lancet Microbe submission/Resubmission/updated_pdf_figures/2021-11-19_core_vs_non-core_positions.csv")
+
+```
+

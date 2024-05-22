@@ -1,0 +1,1478 @@
+---
+title: "2021-09-03_COVID_prolonged_positive_manuscript_tables_figures"
+author: "Shawn Hawken"
+date: "9/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+#knitr::opts_chunk$set(dev = c('pdf'),fig.path='../../manuscripts/prolonged_positive_manuscript/figures_and_tables/')
+rmarkdown::render
+```
+# Clinical characteristics of patients with prolonged positivity with SARS-CoV2  
+-tables and figures for manuscript
+
+### Load workspace image containing data to generate figures and table for manuscript
+-data processed and saved according to date of file
+-load in de-identified data  
+
+```{r, read_in_data}
+# pathology drive: 
+#setwd('/Volumes/Clin Micro Miller Research/Shawn_COVID_research/COVID/COVID_scripts')
+
+load(file="2021-09-03_prolonged_positive_de-identified_workspace.R")
+
+# load packages
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(lubridate)
+library(kableExtra)
+library(openxlsx)
+library(ggrepel)
+library(ggforce)
+library(ape)
+library(msa)
+library(gtsummary)
+library(tidyr)
+library(table1)
+#library(boot)
+
+
+#custom function libraries for analysis and generating figures
+source("lib/2020-11-18_functions_for_repeat_testing_analysis.R")
+```
+
+## Results section for manuscript
+
+__Summary of SARS-CoV2 testing during study__
+Total tests run  
+Total positive and total negatives  
+Distribution of tests across platforms used 
+Distribution of specimen types tested   
+Total patients tested  
+Total patients tested >1 time  
+Total patients with >1 positive test  
+Distribution of time between positive tests for patients with >1 positive test  
+Total patients with first and last positive tests w/in 1 incubation period (14 days)  
+Total patients with first and last positive test >=21 days apart  
+total patients with positive/negative/positive pattern
+
+
+```{r, summarize_dataset}
+
+### Summarize number of unique total tests run at UNC hospital and Collected through McLendon labs:
+
+# print min and max dates for current dataset
+print("Date range of Epic data for study: ")
+print(min(covid.df$Collected, na.rm = T))
+print(max(covid.df$Collected,na.rm = T))
+
+print('Total tests run:')
+print(dim(covid.df)[1])
+
+print("breakdown of negative and positive tests overall during timeframe: ")
+print(table(covid.df$pos.test))
+
+
+print("Distribution of tests across platforms used: ")
+print(table(covid.df$platform))
+
+
+
+print("Distribution of specimen types for tests performed: ")
+print(sort(table(as.vector(covid.df$specimen.Type.clean))))
+print(sort((table(as.vector(covid.df$specimen.Type.clean))/dim(covid.df)[1])*100))
+
+
+print("Distribution of positive and negative tests by specimen types for tests performed: ")
+#summary table positive and negative tests by speciment type
+pos.neg.spec.type.df<-as.data.frame(do.call(cbind, by(as.vector(covid.df$specimen.Type.clean), covid.df$pos.test, summary)))
+# add % positive column
+pos.neg.spec.type.df$percent.pos<-round(pos.neg.spec.type.df$Positive/(pos.neg.spec.type.df$Negative + pos.neg.spec.type.df$Positive)*100,2)
+print(pos.neg.spec.type.df)
+
+pos.neg.spec.type.df$specimen_type<-rownames(pos.neg.spec.type.df)
+#write.xlsx(pos.neg.spec.type.df,
+           #file = "../../manuscripts/prolonged_positive_manuscript/JCM_submission/figures_and_tables/2021-09-03_percent_positive_by_specimen_type.xlsx")
+
+print('Total unique patients tested:')
+length(unique(covid.df$study.id))
+
+
+print("Unique patients with at least 1 positive test at any time: ")
+# positive at any time
+covid.pos.pts<-as.character(covid.df$study.id)[covid.df$Value == "Positive" | covid.df$Value == "Detected" ]
+print(length(unique(covid.pos.pts)))
+
+print("Patients who were tested more than once: ")
+patients.mult.tests<-names(table(covid.df$study.id)[table(covid.df$study.id) >1])
+print(length(unique(patients.mult.tests)))
+
+
+print("Patients who were tested more than once including at least 1 positive at any time: ")
+print(length(unique(patients.mult.tests[patients.mult.tests %in% covid.pos.pts])))
+
+print("Patients with >1 positive test:")
+print(length(unique(mult.pos.df$study.id)))
+
+
+
+print("Interval between first and last positive tests (days) for patients who tested positive more than once: ")
+print(summary(as.numeric(repeat.test.df$first.last.pos.days[!duplicated(repeat.test.df$study.id)])))
+
+#Total patients with first and last positive tests w/in 1 incubation period (14 days)
+print("Interval between first and last positive tests (days) within 1 incubation period (14 days) for patients who tested positive more than once: ")
+print(summary(as.numeric(repeat.test.df$first.last.pos.days[!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days <= 14])))
+print("N patients: ")
+print(sum(!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days <= 14))
+
+
+print("Interval between first and last positive tests (days) greater than the 3rd quartile for first and last positive date (28 days) for patients who tested positive more than once: ")
+print(summary(as.numeric(repeat.test.df$first.last.pos.days[!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days >28])))
+print("N patients: ")
+print(sum(!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days >28))
+
+
+print("Total patients with positive negative positive pattern: ")
+print(length(unique(repeat.test.df$study.id[repeat.test.df$pos.test.count>1 & repeat.test.df$first.last.pos.days>1 & repeat.test.df$pos.neg.pos>0])))
+
+
+print("number of intermittent negative tests between positive tests")
+
+
+
+
+# generate spreadsheet for study.idS for study
+# send 4/20 2021
+#write.csv(x = repeat.test.df$study.id[!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days >28],file #= "data/chart_review_data/2021-03-12_full_cohort/2021-04-20_prolonged_covid_positive_57_pts.csv")
+
+
+```
+
+
+### Supplemental table 1: Summary of RT-PCR tests performed during study
+-table w/specimen type and % positivity and platforms testing occured on
+
+```{r,supplemental_table_1,fig.width=10,fig.height=11}
+
+
+pos.neg.platform.df<-as.data.frame(do.call(cbind, by(as.vector(covid.df$specimen.Type.clean), covid.df$platform, summary)))
+
+pos.neg.spec.type.df<-as.data.frame(do.call(cbind, by(as.vector(covid.df$specimen.Type.clean), covid.df$pos.test, summary)))
+
+
+# add % positive column
+pos.neg.spec.type.df$percent.pos<-round(pos.neg.spec.type.df$Positive/(pos.neg.spec.type.df$Negative + pos.neg.spec.type.df$Positive)*100,2)
+
+
+sup.tab.1<-cbind(pos.neg.platform.df, pos.neg.spec.type.df)
+
+knitr::kable(sup.tab.1, caption = 'Supplemental table 1: summary of RT-PCR tests performed during study')
+
+#print(sup.tab.1)
+#write.csv(sup.tab.1, file="figures/2021-06-12_supplemental_1.csv")
+```
+
+
+
+### Supplemental table 2: types of patients tested on each platform
+-not 100% sure we need this table, will clean it up and collapse rows if we want to present this data
+
+```{r, supplemental_table_2}
+
+order.dept.platform<-as.matrix(table(as.vector(covid.df$Ordering.Department),as.vector(covid.df$platform)))
+
+order.dept.platform<-order.dept.platform[order(rowSums(order.dept.platform)),]
+
+
+knitr::kable(order.dept.platform, caption = 'Supplemental table 2: location of patients tested on each platform')
+
+#write.csv(order.dept.platform, file="figures/2021-06-12_supplemental_2.csv")
+
+```
+
+
+### Figure 1A: SARS-CoV2 testing patterns for patients who tested positive >1 time during the study
+
+```{r,Figure_1A, fig.width=10,fig.height=11}
+
+repeat.test.df$Collected<-as.Date(repeat.test.df$Collected)
+
+result.colors<-c("blue","red")
+
+ggplot(repeat.test.df, aes(y=reorder(study.id, first.pos.date), x=Collected, group=study.id)) + 
+  geom_jitter( height = 0.1,width = 0.0,size = 1, aes(fill=pos.test), colour="black", pch=21)+
+  xlab("Time (week) ") +
+  ylab("Patients") + 
+  theme_bw()+
+   theme( panel.grid.major.y = element_line( size=.3, color="darkgrey" ),axis.text.x = element_blank()) +
+  ggtitle("Patients with at least 2 positive tests")+
+  labs(fill='RT-PCR Result')+
+scale_x_date(breaks = seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by = 7), labels=seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by =7))+
+  theme(axis.text.x = element_text(angle = 90), axis.text.y=element_blank())+
+  scale_fill_manual(values=result.colors)+
+ scale_shape_manual(values = c(21,22,23,24))+
+  xlab("Time (week) ") +
+  ylab("Patients")
+
+
+```
+
+
+### Figure 1B: Distribution of timing between first and last positive test for patients who tested positive >1 time during the study
+
+```{r,figure_1B, fig.width=5,fig.height=5}
+
+
+repeat.test.df$third.quartile<-repeat.test.df$first.last.pos.days > 28
+
+ggplot(data=subset(repeat.test.df, !(duplicated(study.id))), aes(y=first.last.pos.days, x = factor(Testing.Lab))) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.3, color="black",outlier.size=-1)+
+  geom_jitter(height = 0.0,width = 0.1,size = 1.75,pch=21, aes(fill=third.quartile))+
+  scale_fill_manual(values=c("#999999", "cornflowerblue"),labels = c("less than or equal to 28 days", "greater than 28 days"))+
+  labs(fill="Days between first and last positive test") +
+  ggtitle("Days between first and last positive test")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 20))+
+    xlab("Tests from patients with \n multiple positive tests") +
+  ylab("Days between first and last positive test")+
+  theme_bw()+
+theme(axis.text.x = element_blank())
+
+
+ggsave(path = "fig_jpegs_and_table/",filename = "2022-03-02_figure_1",
+      width =6.87, height =9.06, device='tiff', dpi=300)
+
+```
+
+
+## Results section 2: summarize characteristics of patients with prolonged positivity
+-number of tests among patients with prolonged positivity
+-intermittent positivity  
+-timing between negative and subsequent positive for intermittant positives  
+-specimen source for intermittent positives  
+-types of specimens tested ovet time  
+-Association between Ct values and specimen type tested over time  
+
+
+```{r, summarise_characteristics_pts_prolonged_pos}
+# patients with first/last positive >28 days apart during the study  
+prolonged.pos.pts<-repeat.test.df$study.id[!duplicated(repeat.test.df$study.id) & repeat.test.df$first.last.pos.days >28]
+
+prolonged.pos.df<-repeat.test.df[repeat.test.df$study.id %in% prolonged.pos.pts, ]
+
+print("Number of tests among patients with prolonged positivity >28 days: ")
+print(dim(prolonged.pos.df)[1])
+
+print("number of negative and positive tests: ")
+print(table(prolonged.pos.df$pos.test))
+
+print("distribution of positive tests per patient: ")
+ summary(prolonged.pos.df$pos.test.count[!(duplicated(prolonged.pos.df$study.id))])
+
+print("patients with negative tests between positive tests: ")
+table(prolonged.pos.df$pos.neg.pos[!duplicated(prolonged.pos.df$study.id)])
+
+print("Number of negative tests per patient between positive tests for patients with intermittent positives: ")
+summary(prolonged.pos.df$pos.neg.pos[!duplicated(prolonged.pos.df$study.id)])
+
+#df subset for patient with prolonged positivity
+prolonged.pos.pos.tests.df<-prolonged.pos.df[prolonged.pos.df$pos.test == "Positive", ]
+
+```
+
+### compare percentages of intemittant positivity among non-prolonged and prolonged positive patients
+
+```{r}
+
+
+# non prolonged
+(33-16)/(264-57)*100
+
+# prolonged
+
+
+
+# prop.test
+print("prop test for intermittant positives among non-prolonged and prolonged positive patients")
+prop.test(x = c(17, 16), n = c(207, 57))
+```
+
+
+
+
+#### examine missing Ct values: wrong platform assigned?
+- NOT SURE WHY WE ARE MISSING THESE CT VALUES??
+- INVESTIGATE IN EPIC?
+```{r, examine_mising_ct_values}
+
+
+
+for(sid in manual.ct.values.df$MPI){
+
+# current values 
+current.ceph.e<-manual.ct.values.df$Cepheid_E[manual.ct.values.df$MPI ==sid]
+current.ceph.n2<-manual.ct.values.df$Cepheid_N2[manual.ct.values.df$MPI ==sid]
+current.alinity<-manual.ct.values.df$Alinity[manual.ct.values.df$MPI ==sid]
+
+
+if(is.na(prolonged.pos.df$Cepheid_E[prolonged.pos.df$SID == sid]) & !is.na(current.ceph.e)){
+  prolonged.pos.df$Cepheid_E[prolonged.pos.df$SID == sid]<-as.numeric(current.ceph.e)
+  }
+
+
+if(is.na(prolonged.pos.df$Cepheid_N2[prolonged.pos.df$SID == sid]) & !is.na(current.ceph.n2)){
+  prolonged.pos.df$Cepheid_N2[prolonged.pos.df$SID == sid]<-as.numeric(current.ceph.n2)
+  }
+
+if(is.na(prolonged.pos.df$Alinity[prolonged.pos.df$SID == sid]) & !is.na(current.alinity)){
+  prolonged.pos.df$Alinity[prolonged.pos.df$SID == sid]<-as.numeric(current.alinity)
+}
+  
+}
+
+#df subset for patient with prolonged positivity
+prolonged.pos.pos.tests.df<-prolonged.pos.df[prolonged.pos.df$pos.test == "Positive", ]
+
+missing.ct.test<-prolonged.pos.pos.tests.df[rowSums(prolonged.pos.pos.tests.df[,c("M2000","Alinity","Cepheid_E","Cepheid_N2", "Cepheid_RdRp")],na.rm = T) <1 & prolonged.pos.pos.tests.df$platform != "ML-MANUAL",]
+
+#write table to find the missing Ct values by hand from instrument
+find.missing.Ct<-missing.ct.test[,c("Resulted","study.id","Specimen.ID","Method","MPI","platform","Alinity",                        "Cepheid_RdRp","Cepheid_E","Cepheid_N2")]
+
+paste0("patients withing at least 1 test with missing CT values: ", length(unique(missing.ct.test$study.id)))
+paste0("orders from patients with CT value missing: ", length(unique(missing.ct.test$MPI)))
+
+paste0("Percent of Ct values we have from positive tests from prolonged positive patients: ",round(((table(prolonged.pos.df$pos.test)[2]-length(unique(missing.ct.test$MPI)))/table(prolonged.pos.df$pos.test)[2])*100,2),"%")
+
+
+```
+
+
+
+### Figure 2A: Ct value and specimen type over time for patients with prolonged positivity
+-plot CT positive tests over time since first positive by specimen type and platform  
+-remove negative test dates for plotting
+
+```{r,figure_2A, fig.width=7,fig.height=5}
+
+# days between first positive and current test
+prolonged.pos.df$current.test.to.first.pos<-prolonged.pos.df$Collected-prolonged.pos.df$first.pos.date
+
+CN.plot.df<-prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean"))
+
+#dummy number for negative tests
+DF1$value[DF1$pos.test == "Negative"]<-45 
+DF1<-DF1[DF1$value !=45,]
+
+# make negative tests at above the limit of detection
+
+DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value))]<-DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value)) ] + 10
+
+
+
+DF1$value<-round(DF1$value,2)
+
+
+
+ggplot(data=subset(DF1, current.test.to.first.pos >0 & value != 0), aes(y=value, x = current.test.to.first.pos)) +
+  geom_jitter(height = 0.0,width = 0.15,size = 1.5 , aes(fill=value, shape = specimen.Type.clean), color = "black")+
+  scale_shape_manual(values = c(21,22,23,24))+
+  scale_fill_gradient(name = "Ct value", 
+                        low = "red", high = "blue")+
+  labs(fill="Ct value", shape = "Specimen type") +
+  ggtitle("Days since first positive test")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 20),trans = 'log10')+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+    xlab("Days") +
+  ylab("Ct value")+
+  stat_smooth()+
+  theme_bw()
+#+
+  #theme_bw(axis.text.x = element_text(angle=90, size = 2))
+
+prolonged.pos.ct.formattted<-DF1
+
+```
+
+
+
+## specimen type for negative and positive test for prolonged positivity based on days since first positive test
+
+```{r,specimen_type_negative_positive_ct,  warning=FALSE,fig.width=8,fig.height=8}
+CN.plot.df<-prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean"))
+DF1$value<-round(DF1$value,2)
+
+
+ggplot(data=subset(DF1, current.test.to.first.pos >=0 & value != 0), aes(y=value, x = current.test.to.first.pos, group=specimen.Type.clean)) +
+  geom_jitter(height = 0.0,width = 0.15,size = 1.5 , aes(fill=value, shape = specimen.Type.clean), color = "black")+
+  scale_shape_manual(values = c(21,22,23,24))+
+  scale_fill_gradient(name = "Cycle Number", 
+                        low = "red", high = "blue")+
+  labs(fill="Ct value", shape = "Specimen type") +
+  ggtitle("Days since first positive test")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 20),trans = 'log10')+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+    xlab("Days") +
+  ylab("Ct value")+
+  facet_wrap(vars(specimen.Type.clean))+
+  stat_smooth()+
+  theme(axis.text.x = element_text(angle=90, size = 8),strip.text = element_text(size = 12,angle=90))
+
+
+
+```
+
+
+
+## Supplemental figure 1: Days since first positive test for patients WITHOUT prolonged positivity
+-note scales of x axis are different 
+
+```{r,supplemental_figure_1, fig.width=7,fig.height=5}
+
+# days between first positive and current test
+not.prolonged.pos.df<-repeat.test.df[!(repeat.test.df$study.id %in% prolonged.pos.pts), ]
+
+not.prolonged.pos.df$current.test.to.first.pos<-not.prolonged.pos.df$Collected-not.prolonged.pos.df$first.pos.date
+
+CN.plot.df<-not.prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean"))
+
+#dummy number for negative tests
+DF1$value[DF1$pos.test == "Negative"]<-45 
+
+
+# make negative tests at above the limit of detection
+
+DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value))]<-DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value)) ] + 10
+
+DF1<-DF1[DF1$value !=45,]
+
+DF1$value<-round(DF1$value,2)
+
+
+ggplot(data=subset(DF1, current.test.to.first.pos >0 & value != 0), aes(y=value, x = current.test.to.first.pos)) +
+  geom_jitter(height = 0.0,width = 0.15,size = 1.5 , aes(fill=value, shape = specimen.Type.clean), color = "black")+
+  scale_shape_manual(values = c(21,22,23,24,25,19,8,12))+
+  scale_fill_gradient(name = "Cycle Number", 
+                        low = "red", high = "blue")+
+  labs(fill="Ct value", shape = "Specimen type") +
+  ggtitle("Days since first positive test")+
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 20),trans='log10')+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+    xlab("Days") +
+  ylab("Ct value")+
+  stat_smooth()
+#+
+  #theme_bw(axis.text.x = element_text(angle=90, size = 2))
+
+
+
+#bins for weeks since first positive test
+DF1<-DF1[DF1$current.test.to.first.pos>0,]
+DF1$week.bin<-ceiling(DF1$current.test.to.first.pos/7)
+DF1<-DF1[DF1$pos.test=="Positive",]
+
+
+#DF1$week.bin[DF1$week.bin ==5]<-5
+
+day.labs<-c("1-7","8-14","15-21","22-28")
+
+DF1$specimen.Type.clean[!(DF1$specimen.Type.clean %in% 'Nasopharyngeal Swab') & !is.na(DF1$specimen.Type.clean)]<-"Other"
+
+ggplot(data=subset(DF1, !(is.na(week.bin))), aes(x=1, y = value)) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.1, color="black",outlier.size=-1)+
+  geom_jitter(height = 0.0,width = 0.24,size = 1.5,aes(shape = specimen.Type.clean),color="black")+
+  scale_shape_manual(values = c(20,21,22,23,24))+
+  labs(shape = "Specimen type") +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 15))+
+    xlab("1-28") +
+  ylab("Cycle threshold")+
+  theme_bw()+
+  scale_x_discrete(labels= day.labs)+
+  ggtitle("Patients without prolonged positivity")
+
+ggsave(path = "fig_jpegs_and_table/",filename = "2022-03-02_figure_2A",
+        width =6.87, height =9.06, device='tiff', dpi=300)
+
+ct.formatted.pts.no.prolonged.pos<-DF1
+
+```
+
+
+
+
+## Figure 2B: ct trend by specimen type over time linked to each patient for patients with intermittant positive tests
+
+for individual patients need to plot unknown values from LDT tests or it is missleading.
+-__NOTE: patients may have <28 days represented because we do not have Ct values for LDT and other missing Cts__
+
+
+```{r,figure_2B, fig.width=8,fig.height=8}
+
+# days between first positive and current test
+prolonged.pos.df$current.test.to.first.pos<-prolonged.pos.df$Collected-prolonged.pos.df$first.pos.date
+
+CN.plot.df<-prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean"))
+
+#dummy number for negative tests
+DF1$value[DF1$pos.test == "Negative"]<-45 
+#DF1<-DF1[DF1$value !=45,]
+
+# make negative tests at above the limit of detection
+
+DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value))]<-DF1$value[DF1$variable == "M2000" & DF1$value >0 & DF1$value < 45 & !(is.na(DF1$value)) ] + 10
+
+
+
+DF1$value<-round(DF1$value,2)
+
+
+prolonged.int.pos.pt<-unique(prolonged.pos.df$study.id[!duplicated(prolonged.pos.df$study.id) & prolonged.pos.df$pos.neg.pos >0])
+
+
+DF1$study.id.factor<-as.factor(DF1$study.id)
+levels(DF1$study.id.factor)<-1:57
+
+ggplot(data=subset(DF1, current.test.to.first.pos >=0 & value != 0 & study.id %in% prolonged.int.pos.pt), aes(y=value, x = current.test.to.first.pos, group=study.id)) +
+  geom_jitter(height = 0.0,width = 0.15,size = 1.5 , aes(fill=value, shape = specimen.Type.clean), color = "black")+
+  scale_shape_manual(values = c(21,22,23,24))+
+  scale_fill_gradient(name = "Cycle Number", 
+                        low = "red", high = "blue")+
+  labs(fill="Ct value", shape = "Specimen type") +
+  ggtitle("Days since first positive test: prolonged positive patients with intermittent positive tests")+
+scale_y_continuous(trans="log10")+
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))+
+    xlab("Days from first positive test") +
+  ylab("Ct value")+
+  #stat_smooth()+
+  geom_line(size = .5)+
+  facet_wrap(~study.id.factor)+
+   theme(axis.text.x=element_text(angle=90,hjust=1))+
+geom_hline(yintercept=45, linetype="dashed", 
+                color = "red", size=1)
+
+
+```
+
+ 
+ 
+### Summarize time between positive and negative tests for intermittent positive patients with prolonged positivity
+-first positive and intermittent negatives before last positive
+-last positive and intermittent negatives before last positive
+-intermittent positives and negatives between first and last positive
+
+
+```{r,time_between_positive_tests_intermittent, warning=FALSE}
+
+#time between first positive and intermittent negative tests before last positive
+int.neg.pos.dates<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+  all.neg.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Negative" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+
+  unique(all.neg.dates-pt.df$first.pos.date)
+  
+})
+names(int.neg.pos.dates)<-prolonged.int.pos.pt
+
+summary(unlist(int.neg.pos.dates))
+
+
+
+#time between last positive and intermittent negative tests before last positive
+int.neg.pos.dates<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+  all.neg.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Negative" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+
+  unique(all.neg.dates-pt.df$last.pos.date)
+  
+})
+names(int.neg.pos.dates)<-prolonged.int.pos.pt
+
+print("Time between last positive anf intermittent negative test before last positive: ")
+summary(unlist(int.neg.pos.dates))
+
+
+
+#time between intermittent positive and intermittent negative tests before last positive
+int.neg.pos.neg.dates<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+  #positives before first and last positive
+  all.pos.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Positive" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+#negatives before first and last positive
+    all.neg.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Negative" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+  
+  unique(all.pos.dates-all.neg.dates)
+  
+})
+names(int.neg.pos.neg.dates)<-prolonged.int.pos.pt
+
+print("Time between intermittent positive and intermittend negative tests before last positive: ")
+summary(unlist(int.neg.pos.neg.dates))
+
+
+
+```
+
+### Summarize specimen type for intermittent positive test
+ 
+```{r, specimen_type_intermittent_positive_tests, warning=FALSE}
+
+int.neg.spec.type<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+
+#negatives before first and last positive
+    all.neg.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Negative" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+    
+  
+  as.vector(pt.df$specimen.Type.clean)[pt.df$Collected == all.neg.dates]
+  
+})
+names(int.neg.spec.type)<-prolonged.int.pos.pt
+
+print("Specimen types for negatives between first and last positive: ")
+table(unlist(int.neg.spec.type))
+
+
+int.pos.spec.type<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+
+#positives between  before first and last positive
+  
+  int.pos.spec.type<-sapply(prolonged.int.pos.pt, FUN=function(pt){
+  
+  pt.df<-prolonged.pos.df[prolonged.pos.df$study.id==pt,]
+  
+
+  
+    all.pos.dates<-as.Date(pt.df$Received)[pt.df$pos.test == "Positive" & pt.df$Collected > pt.df$first.pos.date & pt.df$Collected < pt.df$last.pos.date]
+    
+  
+  as.vector(pt.df$specimen.Type.clean)[pt.df$Collected == all.pos.dates]
+  
+})
+})
+
+
+names(int.pos.spec.type)<-prolonged.int.pos.pt
+
+print("Specimen types for positives between first and last positive: ")
+table(unlist(int.pos.spec.type))
+
+```
+ 
+
+ 
+### Check that full data set is included in clinical data, should be 57 patients with prolonged positivity
+-medication data should have 50 patients according to CDWH
+
+
+```{r, check_clinical_data}
+print(paste0("Unique patients represented in clinical dataset: ", length(unique(clinical.df$study.id))))
+
+print(paste0("Prolonged positive patients missing from clinical chart review dataset : ", length(setdiff(unique(prolonged.pos.pts), unique(clinical.df$study.id)))))
+
+print(paste0("Unique patients represented in meds dataset: ",  length(unique(meds.df$study.id))))
+
+```
+
+ 
+ ### compare basic demographics for patients with and without prolonged positivity  
+ -age  
+ -gender  
+ 
+```{r, compare_demographics_with_without_prolonged_positivity}
+pts.not.prolonged<-setdiff(covid.df$study.id, prolonged.pos.pts)
+
+other.ages<-as.numeric(unlist(regmatches(covid.df$Age, gregexpr("[[:digit:]]+", covid.df$Age))))
+
+# (minimum, lower-hinge, median, upper-hinge, maximum)
+
+# other patients
+fivenum(other.ages[as.vector(covid.df$study.id) %in% pts.not.prolonged])
+
+#prolonged positive patients
+fivenum(other.ages[as.vector(covid.df$study.id) %in% prolonged.pos.pts])
+
+print("Gender distribution for not prolonged positive patients:  ")
+table(covid.df$Gender[as.vector(covid.df$study.id) %in% pts.not.prolonged])
+
+print("Gender distribution for prolonged positive patients:  ")
+table(covid.df$Gender[as.vector(covid.df$study.id) %in% prolonged.pos.pts])
+
+```
+ 
+ 
+ 
+### Check and subset medication data for drugs of interest during study timeframe  
+-patients without meds in spreadsheet  
+-patients with meds in spreadsheet  
+-subset medications for patients of interest based on meds that were looked at by Suba and Billy for the manual chart review  
+-subset for study timeframe  
+
+__chart review drugs: __  
+Tacrolimus (Prograf)  
+mycophenolate (Cellcept)  
+hydroxycloroquine,  
+prednisone,  
+tocilizumab,  
+methotrexate,  
+Mercaptopurine,  
+Fluticasone,  
+Lopinavir / Ritonavir,  
+Canakinumab,  
+Immunoglobulin,  
+Cyclophosphamide  
+
+__Drugs added by me:__    
+-remdesivir  
+-Dexamethasone  
+ 
+```{r,format_drugs}
+
+
+drugs<-c("hydroxychloroquine",
+         "prednisone",
+         "Tacrolimus",
+         "mycophenolate",
+         "tocilizumab",
+         "Plaquenil",
+         "methotrexate",
+         "Mercaptopurine",
+         "Fluticasone",
+         "Lopinavir",
+         "Ritonavir",
+         "Canakinumab",
+         "Immunoglobulin",
+         "Cyclophosphamide",
+         "remdesivir",
+         "Dexamethasone")
+
+
+med.row<-sapply(drugs, FUN=function(med){
+  
+  #return logical vector
+  grepl(med,meds.df$NAME,ignore.case=T)
+
+})
+
+
+# rows containing drugs of interest
+subset.meds.df<-meds.df[rowSums(med.row,na.rm = T)>0,]
+
+
+
+# subset for meds exposures during the study
+#format dates
+subset.meds.df$START_DATE<-as.Date.character(subset.meds.df$START_DATE,format = "%m/%d/%y" )
+subset.meds.df$END_DATE<-as.Date.character(subset.meds.df$END_DATE,format = "%m/%d/%y" )
+
+
+# subset by drugs exposed between min and max collected date for prolonged positive patients
+#logical matrix indicating drug exposure during timeframe
+subset.med.row<-med.row[rowSums(med.row,na.rm = T)>0,]
+
+
+subset.med.row<-subset.med.row[subset.meds.df$START_DATE<=max(prolonged.pos.pos.tests.df$Collected) & subset.meds.df$START_DATE>=min(prolonged.pos.pos.tests.df$Collected),]
+subset.med.row<-subset.med.row[!is.na(subset.med.row[,1]),]
+
+#subset full meds.df for timeframe
+subset.meds.df<-subset.meds.df[subset.meds.df$START_DATE<=max(prolonged.pos.pos.tests.df$Collected) & subset.meds.df$START_DATE>=min(prolonged.pos.pos.tests.df$Collected), ]
+
+
+# add column for clean drug names
+subset.meds.df$clean.drug.name<-sub(" .*",'',subset.meds.df$NAME)
+
+#remove NAs?
+subset.meds.df<-subset.meds.df[!(is.na(subset.meds.df$study.id)),]
+
+
+#subset.meds.df<-subset.meds.df[!(is.na(subset.meds.df)) & ,]
+
+# check number of doses for each drug
+drug.doses<-colSums(med.row)
+
+#unique patients exposed to drugs during the study
+
+drug.patients<-sapply(names(drug.doses),FUN=function(drug){
+  
+  unique(subset.meds.df$study.id[grepl(drug,subset.meds.df$NAME,ignore.case = T)])
+  
+})
+
+knitr::kable(drug.doses, caption = 'Unique drug doses')
+knitr::kable(unlist(lapply(drug.patients,length)),col.names = 'Drugs', caption = 'Patients with at least 1 dose of drug')
+
+drug.doses<-as.data.frame(drug.doses)
+drug.doses$drugs<-rownames(drug.doses)
+
+
+#write.xlsx(x=drug.doses,file ="../../manuscripts/prolonged_positive_manuscript/JCM_submission/figures_and_tables/2021-09-03_medications_patients_exposed_during_study.xlsx")
+
+```
+
+
+### Make meds table
+```{r}
+
+
+# add study.id to logical matrix indicating date
+subset.med.row<-cbind.data.frame(subset.med.row,
+      study.id=subset.meds.df$study.id,
+      start.date=subset.meds.df$START_DATE,
+      end.date=subset.meds.df$END_DATE,
+      frequency.name=subset.meds.df$FREQ_NAME)
+
+
+```
+
+
+## Plot medications over covid testing dates  
+
+```{r,fig.height=15, fig.width=12}
+# 
+# 
+# subset.meds.df$first.pos.date<-sapply(subset.meds.df$study.id, FUN=function(pt){
+#   prolonged.pos.df$first.pos.date[prolonged.pos.df$study.id == pt][1]
+# })
+# 
+# 
+# subset.meds.df$pos.neg.pos<-sapply(subset.meds.df$study.id, FUN=function(pt){
+#   prolonged.pos.df$pos.neg.pos[prolonged.pos.df$study.id == pt][1]
+# })
+# 
+# subset.meds.df$Gender<-sapply(subset.meds.df$study.id, FUN=function(pt){
+#   prolonged.pos.df$Gender[prolonged.pos.df$study.id == pt][1]
+# })
+# 
+# 
+# subset.meds.df$pharm.class.plotting<-subset.meds.df$PHARM_CLASS_NAME
+# subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting=="NULL"]<-subset.meds.df$clean.drug.name[subset.meds.df$pharm.class.plotting=="NULL"]
+# 
+# drug.class.plot<-as.data.frame(table(subset.meds.df$clean.drug.name,subset.meds.df$pharm.class.plotting))
+# drug.class.plot<-drug.class.plot[drug.class.plot$Freq>0, ]
+# #drugs are given different classes, clean this up
+# drug.class.plot[order(drug.class.plot$Var1),]
+# 
+# subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting == "GLUCOCORTICOIDS, ORALLY INHALED"]<-"GLUCOCORTICOIDS"
+# 
+# subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting == "TOCILIZUMAB"]<-"IMMUNOSUPPRESSIVES"
+#                                     
+# subset.meds.df$study.id<-subset.meds.df$study.id                                    
+# 
+# slow.ct.pts<-rownames(pt.factors.df)[pt.factors.df$Last_Positive_Ct<35 & pt.factors.df$first_last_pos_day>=40]
+# slow.ct.pts<-slow.ct.pts[!is.na(slow.ct.pts)]
+# 
+ggplot(subset(prolonged.pos.df,study.id %in% slow.ct.pts), aes(y=reorder(study.id, first.pos.date), x=Collected, group=study.id)) +
+  geom_jitter( height = 0.1,width = 0.0,size = 2, aes(fill=pos.test), colour="black", pch=21)+
+  geom_text_repel(aes(label =Alinity ,angle=85),size=2,max.overlaps = 100,force=1, point.padding=unit(2,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =Cepheid_RdRp ,angle=85),size=3,max.overlaps = 100,force=1, point.padding=unit(2,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =M2000 ,angle=85),size=3,max.overlaps = 100,force=1, point.padding=unit(2,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =Cepheid_N2 ,angle=85),size=3,max.overlaps = 100,force=1, point.padding=unit(2,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =Cepheid_E ,angle=85),size=3,max.overlaps = 100,force=1, point.padding=unit(2,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+
+ xlab("Time (week) ") +
+ylab("Patients") +
+  labs(fill = "SCV-2 test result") +
+theme_bw()+
+theme( panel.grid.major.y = element_line( size=.3, color="darkgrey" ),axis.text.x = element_blank()) +
+scale_x_date(breaks = seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by = 7), labels=seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by =7))+
+theme(axis.text.x = element_text(angle = 90), axis.text.y=element_blank())+
+scale_fill_manual(values=result.colors)
+#  
+# 
+
+```
+
+
+
+### Clean up admission data
+-make naming of locations for disposition consistant
+
+```{r}
+
+admission.df$Discharge_disposition_clean<-admission.df$Discharge_disposition
+admission.df$Discharge_disposition_clean[is.na(admission.df$Discharge_disposition) | admission.df$Discharge_disposition == "N/A"]<-NA
+admission.df$Discharge_disposition_clean[admission.df$Discharge_disposition_clean %in% c("Skilled nursing facility (SNF)","SNF","Skilled nursing facility", " Skilled nursing facility")]<-"SNF"
+
+admission.df$Discharge_disposition_clean[grepl("hospice",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Hospice"
+
+
+admission.df$Discharge_disposition_clean[grepl("assist",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Assisted Living"
+
+admission.df$Discharge_disposition_clean[grepl("home",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Home"
+admission.df$Discharge_disposition_clean[grepl("Against",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Home"
+
+
+admission.df$Discharge_disposition_clean[grepl("deceased",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Deceased"
+
+admission.df$Discharge_disposition_clean[admission.df$Discharge_disposition_clean %in% "Med Hosp H (MDH)"]<-"Hospital"
+
+
+admission.df$Discharge_disposition_clean<-as.vector(admission.df$Discharge_disposition_clean)
+
+admission.df$Discharge_disposition_clean[grepl("acute",admission.df$Discharge_disposition_clean, ignore.case = T)]<-"Rehab"
+# patient still in hospital
+admission.df$Discharge_disposition_clean[admission.df$Notes == "Still admitted (1/8/2021)"]<-"Hospital"
+
+admission.df$Discharge_disposition_clean[grepl("hospice",admission.df$Discharge_disposition, ignore.case = T)]<-"Hospice"
+admission.df$Discharge_disposition_clean[admission.df$Discharge_disposition_clean=='']<-NA
+
+#make the person who is still in the hospital have a discharge date of Oct 17 2020 vs NA
+admission.df$Discharge_date[admission.df$Notes == "Still admitted (1/8/2021)"]<-"10/17/20"
+
+# if missing discharge info but admission date 
+admission.df$Discharge_disposition_clean[(is.na(admission.df$Discharge_date)) & is.na(admission.df$Discharge_disposition_clean)]<-"Never Admitted"
+
+```
+
+
+
+##Table N: summary of characteristics of patients with prolonged positivity: Patient demographic, hospitalization, other infection and treatment characteristics 
+
+__IN PROGRESS__ 
+-still adding variables.  
+
+Distribution of symptomatic at first and subsequent tests  
+Distribution of reasons for secondary testing at later timepoints   
+Summary of clinical features:  
+- hospitalizations  
+-immunocompromised  
+-treated w/antiviral drugs, drugs listed above  
+-other infections during hospitalization during covid  
+-deceased after covid   
+-discharge disposition: last discharge
+-cycle threshold at first positive  
+-cycle threshold at last positive  
+-intermittent negative between positives  
+
+??? hospice?!
+
+```{r}
+# clinical table N patients x variables of interest
+
+admission.df$Admission_date<-as.vector(admission.df$Admission_date)
+admission.df$Admission_date[admission.df$Admission_date=='']<-NA
+admission.df$Discharge_date<-as.vector(admission.df$Discharge_date)
+admission.df$Discharge_date[admission.df$Discharge_date=='']<-NA
+admission.df$LOS<-as.Date(admission.df$Discharge_date,format ="%m/%d/%y" )-as.Date(admission.df$Admission_date,format="%m/%d/%y")
+
+
+# fix BMI character!
+#clinical.df.save<-clinical.df
+
+clinical.df$BMI<-as.vector(clinical.df$BMI)
+clinical.df$BMI<-sub(" kg/m²",'',clinical.df$BMI)
+clinical.df$BMI[clinical.df$BMI=="NONE"]<-NA
+clinical.df$BMI<-as.numeric(clinical.df$BMI)
+
+
+pt.factors.df<-t(sapply(unique(prolonged.pos.pts),FUN=function(pt){
+  
+  # age
+  pt.age<-clinical.df$Age[clinical.df$study.id==pt][1]
+  
+  #sex
+  pt.sex<-as.vector(prolonged.pos.df$Gender)[prolonged.pos.df$study.id==pt][1]
+  
+  #BMI
+  pt.bmi<-clinical.df$BMI[clinical.df$study.id==pt][1]
+  
+  #admitted
+  pt.admit.all<-admission.df$Admission_date[admission.df$study.id==pt & !is.na(admission.df$Admission_date)]
+  
+  if(sum(!is.na(pt.admit.all))>0){
+      pt.admit<-"Admitted"
+  }else{
+    pt.admit<-"Never admitted"
+  } #end else
+
+  #admission LOS
+  pt.los<-sum(admission.df$LOS[admission.df$study.id==pt],na.rm = T)
+
+  # days between first and last positive
+  pt.first.last.pos.day<-prolonged.pos.df$first.last.pos.days[prolonged.pos.df$study.id==pt][1]
+  
+  
+  #first positive Ct value
+pt.first.pos.Ct<-max(prolonged.pos.ct.formattted$value[prolonged.pos.ct.formattted$study.id==pt & prolonged.pos.ct.formattted$current.test.to.first.pos==0],na.rm = T)
+  
+  
+  #last test Ct value
+  last.pos.day.pt<-as.numeric(prolonged.pos.df$first.last.pos.days[prolonged.pos.df$study.id==pt][1] )
+  
+
+# ct value on last positive day for the patient
+  pt.last.pos.Ct<-as.vector(max(prolonged.pos.ct.formattted$value[prolonged.pos.ct.formattted$study.id==pt & prolonged.pos.ct.formattted$current.test.to.first.pos==last.pos.day.pt],na.rm = T))
+  
+
+  #change in Ct value
+ 
+  #drugs
+  
+  
+  
+  #discharge disposition at last discharge
+  if(pt.admit=="Admitted"){
+    
+  pt.final.disch<-max(admission.df$Discharge_date[admission.df$study.id==pt],na.rm = T)
+  
+  final.discharge.dispo<-sort(admission.df$Discharge_disposition_clean[admission.df$study.id==pt & admission.df$Discharge_date==pt.final.disch])
+  
+  if(length(final.discharge.dispo)==0){
+    final.discharge.dispo<-NA
+  }
+
+  } else{
+
+    final.discharge.dispo<-"Never Admitted"
+  }
+
+
+  # length of stay in hospital
+
+  
+  #other infections
+  
+  
+  out.vec<-c(pt.age,
+             pt.bmi, 
+             pt.sex,
+             pt.admit,
+             pt.los,
+            final.discharge.dispo,
+             pt.first.pos.Ct,
+             pt.last.pos.Ct,
+             pt.first.last.pos.day)
+  names(out.vec)<-c("Age",
+                    "BMI",
+                    "Sex",
+                    "Admitted",
+                    "Length_of_stay",
+                  "Discharge_disposition",
+                    "First_Positive_Ct",
+                    "Last_Positive_Ct",
+                    "first_last_pos_day")
+  return(out.vec)
+  
+}))
+
+rownames(pt.factors.df)<-unique(prolonged.pos.pts)
+pt.factors.df<-as.data.frame(pt.factors.df)
+
+
+
+## Format table 1
+
+
+pt.factors.df$first_last_pos_day<-as.numeric(as.vector(pt.factors.df$first_last_pos_day))
+label(pt.factors.df$First_Positive_Ct)<- "Days between first and last positive"
+pt.factors.df$first_last_pos_day<-as.numeric(as.vector(pt.factors.df$first_last_pos_day))
+units(pt.factors.df$first_last_pos_day)<- "days"
+label(pt.factors.df$first_last_pos_day) <- "Time between first and last positive"
+
+
+
+pt.factors.df$First_Positive_Ct<-as.numeric(as.vector(pt.factors.df$First_Positive_Ct))
+pt.factors.df$First_Positive_Ct[is.infinite(pt.factors.df$First_Positive_C)]<-NA
+label(pt.factors.df$First_Positive_Ct)<- "Cycle threshold first positive"
+
+pt.factors.df$Last_Positive_Ct<-as.numeric(as.vector(pt.factors.df$Last_Positive_Ct))
+pt.factors.df$Last_Positive_Ct[is.infinite(pt.factors.df$Last_Positive_C)]<-NA
+label(pt.factors.df$Last_Positive_Ct)<- "Cycle threshold last positive"
+
+
+
+pt.factors.df$Age<-as.numeric(as.vector(pt.factors.df$Age))
+units(pt.factors.df$Age)<- "years"
+label(pt.factors.df$Age) <- "Age"
+
+pt.factors.df$BMI<-as.numeric(as.vector(pt.factors.df$BMI))
+units(pt.factors.df$BMI)<- "kg/m^2"
+label(pt.factors.df$BMI) <- "BMI"
+
+
+
+
+
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Mean (SD)"=sprintf("%s (&plusmn; %s)", MEAN, SD)))
+}
+my.render.cat <- function(x) {
+    c("", sapply(stats.default(x), function(y) with(y,
+        sprintf("%d (%0.0f %%)", FREQ, PCT))))
+}
+
+
+pdf(file = 'summary_table.pdf')
+table1(~ Sex + BMI + Age + First_Positive_Ct + Last_Positive_Ct + first_last_pos_day + Admitted + Discharge_disposition, data=pt.factors.df,
+       render.continuous=my.render.cont, render.categorical=my.render.cat)
+dev.off()
+```
+
+
+
+### Figure 2: Ct range by first through Nth test violin plot
+-try binning by days N=7
+
+```{r,Figure_1_Ct_range_by_day_since_first_positive_violin_plot}
+
+CN.plot.df<-prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean"))
+DF1$value<-round(DF1$value,2)
+#bins for weeks since first positive test
+DF1<-DF1[DF1$current.test.to.first.pos>0,]
+DF1$week.bin<-ceiling(DF1$current.test.to.first.pos/28)
+DF1<-DF1[DF1$pos.test=="Positive",]
+
+# add 10 cycles for M2000
+DF1$value[DF1$variable == "M2000"]<-DF1$value[DF1$variable == "M2000"]+10
+
+
+
+
+DF1$week.bin[DF1$week.bin ==6]<-5
+
+day.labs<-c("1-28","29-56","57-85","86-112",">=113")
+
+DF1$specimen.Type.clean[!(DF1$specimen.Type.clean %in% 'Nasopharyngeal Swab') & !is.na(DF1$specimen.Type.clean)]<-"Other"
+
+
+ggplot(data=DF1, aes(x=factor(round(week.bin)), y = value)) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.1, color="black",outlier.size=-1)+
+  geom_jitter(height = 0.0,width = 0.24,size = 1.5,aes(shape = specimen.Type.clean),color="black")+
+  scale_shape_manual(values = c(20,21,22,23,24))+
+  labs(shape = "Specimen type") +
+  scale_y_continuous(breaks = seq(14,46,2))+
+    xlab("Days from first positive test") +
+  ylab("Cycle threshold")+
+  theme_bw()+
+  scale_x_discrete(labels= day.labs)+
+  ggtitle("Patients with prolonged positivity")
+
+ggsave(path = "fig_jpegs_and_table/",filename = "2022-03-02_figure_2A",
+       width =6.87, height =9.06, device='tiff', dpi=300)
+```
+
+
+### Summarize Ct values for patients without prolonged positivty
+```{r}
+
+# days between first positive and current test
+not.prolonged.pos.df<-repeat.test.df[!(repeat.test.df$study.id %in% prolonged.pos.pts), ]
+
+not.prolonged.pos.df$current.test.to.first.pos<-not.prolonged.pos.df$Collected-not.prolonged.pos.df$first.pos.date
+
+CN.plot.df<-not.prolonged.pos.df[,c("study.id","MPI","current.test.to.first.pos","pos.test","M2000","Alinity","Cepheid_E","Cepheid_N2","specimen.Type.clean","first.last.pos.days")]
+
+DF1 <- melt(CN.plot.df, id.var=c("study.id","MPI","pos.test","current.test.to.first.pos","specimen.Type.clean","first.last.pos.days"))
+
+
+
+first.pos.ct<-sapply(unique(DF1$study.id),FUN=function(pt){
+  
+  max(DF1$value[DF1$study.id==pt & DF1$current.test.to.first.pos==0],na.rm = T)
+  
+})
+
+
+ last.pos.ct<-sapply(unique(DF1$study.id),FUN=function(pt){ 
+   
+    last.pos.day.pt<-as.numeric(DF1$first.last.pos.days[DF1$study.id==pt][1])
+  
+  
+    # ct value on last positive day for the patient
+  pt.last.pos.Ct<-as.vector(max(DF1$value[DF1$study.id==pt & DF1$current.test.to.first.pos==last.pos.day.pt],na.rm = T))
+
+    
+   })
+  #last test Ct value
+ 
+ 
+  last.pos.day.pt<-sapply(unique(DF1$study.id),FUN=function(pt){ 
+   
+    last.pos.day.pt<-as.numeric(DF1$first.last.pos.days[DF1$study.id==pt][1])
+  })
+ 
+
+not.prolonged.pos.ct<-as.data.frame(cbind(unique(DF1$study.id), first.pos.ct, last.pos.ct,last.pos.day.pt))
+not.prolonged.pos.ct$delta.ct<-not.prolonged.pos.ct$last.pos.ct-not.prolonged.pos.ct$first.pos.ct
+
+
+summary(not.prolonged.pos.ct$delta.ct[is.finite(not.prolonged.pos.ct$delta.ct)])
+
+# patients with lower ct/more virus at last test vs first.
+
+length(unique(not.prolonged.pos.ct$V1)[not.prolonged.pos.ct$delta.ct<0 &  is.finite(not.prolonged.pos.ct$delta.ct)])
+
+not.prolonged.pos.ct$last.pos.day.pt[not.prolonged.pos.ct$delta.ct<0 &  is.finite(not.prolonged.pos.ct$delta.ct)]
+
+summary(not.prolonged.pos.ct$last.pos.day.pt[not.prolonged.pos.ct$delta.ct<0 &  is.finite(not.prolonged.pos.ct$delta.ct)])
+
+```
+
+
+
+
+
+### For CVS abstract
+
+```{r}
+
+# terminal positive ct for patients with prolonged positivity
+sum(pt.factors.df$Last_Positive_Ct>35 ,na.rm = T)
+#[1] 33
+sum(pt.factors.df$Last_Positive_Ct>35 ,na.rm = T)/(length(pt.factors.df$Last_Positive_Ct[!is.na(pt.factors.df$Last_Positive_Ct)]))
+
+
+# obese count
+length(pt.factors.df$BMI[pt.factors.df$BMI>=30 & !(is.na(pt.factors.df$BMI))])
+
+
+# admitted
+pt.factors.df$Admitted
+
+
+# discharge to hospice or deceased
+
+length(unique(admission.df$study.id[admission.df$Discharge_disposition_clean %in% c("Assisted Living","SNF")]))
+
+
+
+```
+
+
+## Figure 4 testing with Ct over time
+
+
+```{r,fig.height=15, fig.width=12}
+
+
+subset.meds.df$first.pos.date<-sapply(subset.meds.df$study.id, FUN=function(pt){
+  prolonged.pos.df$first.pos.date[prolonged.pos.df$study.id == pt][1]
+})
+
+
+subset.meds.df$pos.neg.pos<-sapply(subset.meds.df$study.id, FUN=function(pt){
+  prolonged.pos.df$pos.neg.pos[prolonged.pos.df$study.id == pt][1]
+})
+
+subset.meds.df$Gender<-sapply(subset.meds.df$study.id, FUN=function(pt){
+  prolonged.pos.df$Gender[prolonged.pos.df$study.id == pt][1]
+})
+
+
+subset.meds.df$pharm.class.plotting<-subset.meds.df$PHARM_CLASS_NAME
+subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting=="NULL"]<-subset.meds.df$clean.drug.name[subset.meds.df$pharm.class.plotting=="NULL"]
+
+drug.class.plot<-as.data.frame(table(subset.meds.df$clean.drug.name,subset.meds.df$pharm.class.plotting))
+drug.class.plot<-drug.class.plot[drug.class.plot$Freq>0, ]
+#drugs are given different classes, clean this up
+drug.class.plot[order(drug.class.plot$Var1),]
+
+subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting == "GLUCOCORTICOIDS, ORALLY INHALED"]<-"GLUCOCORTICOIDS"
+
+subset.meds.df$pharm.class.plotting[subset.meds.df$pharm.class.plotting == "TOCILIZUMAB"]<-"IMMUNOSUPPRESSIVES"
+                                    
+subset.meds.df$study.id<-subset.meds.df$study.id                                    
+
+slow.ct.pts<-rownames(pt.factors.df)[pt.factors.df$Last_Positive_Ct<35 & pt.factors.df$first_last_pos_day>=40]
+slow.ct.pts<-slow.ct.pts[!is.na(slow.ct.pts)]
+
+
+#tiff("fig_jpegs_and_table/2022-03-02_figure_3", units="in",width = 6.87, height #= 9.06, device='tiff', dpi=300)
+
+ggplot(subset(prolonged.pos.df,study.id %in% slow.ct.pts), aes(y=reorder(study.id, first.pos.date), x=Collected, group=study.id)) + 
+  geom_jitter( height = 0.01,width = 0.0,size = 2, aes(fill=pos.test), colour="black", pch=21)+
+  geom_text_repel(aes(label =Alinity ,angle=75),size=2,max.overlaps = 100,force=1, point.padding=unit(1,'lines'),
+                direction = 'y',
+                nudge_y = 0.3,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =Cepheid_RdRp ,angle=75),size=2,max.overlaps = 100,force=1, point.padding=unit(1,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_text_repel(aes(label =M2000 ,angle=75),size=2,max.overlaps = 100,force=1, point.padding=unit(1,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+ # geom_text_repel(aes(label =Cepheid_N2 ,angle=75),size=2,max.overlaps = 100,force=1, point.padding=unit(1,'lines'),
+               # direction = 'y',
+               # nudge_y = 0.2,
+               # segment.size=0.2)+
+  geom_text_repel(aes(label =Cepheid_E ,angle=75),size=2,max.overlaps = 100,force=1, point.padding=unit(1,'lines'),
+                direction = 'y',
+                nudge_y = 0.2,
+                segment.size=0.2)+
+  geom_point(data=subset(subset.meds.df,study.id %in% slow.ct.pts), aes(y=reorder(study.id, first.pos.date), x=START_DATE, group=study.id, colour=factor(pharm.class.plotting)), pch=22,height = 0.1,width = 0.0,size = 1.5)+
+  xlab("Time (week) ") +
+  ylab("Patients") + 
+  theme_bw()+
+   theme( panel.grid.major.y = element_line( size=.3, color="darkgrey" ),axis.text.x = element_blank()) +
+  #ggtitle("Figure 3:Positive and negative tests prolonged positive patients")+
+  labs(fill='RT-PCR Result')+
+scale_x_date(breaks = seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by = 7), labels=seq(min(repeat.test.df$Collected), max(repeat.test.df$Collected), by =7))+
+  theme(axis.text.x = element_text(angle = 90))+
+  scale_fill_manual(values=result.colors)+
+ scale_shape_manual(values = c(21,22,23,24))+
+  xlab("Time (week) ") +
+  ylab("Patients")+
+  scale_y_discrete(labels=c('796106'="Patient 1","778296"="Patient 2","854418"= "Patient 3","958344"="Patient 4", "87660"="Patient 5", "211382"="Patient 6"))
+  
+#dev.off()
+
+
+ggsave(path = "fig_jpegs_and_table/",filename = "2022-03-02_figure_3",
+      width =6.87, height =9.06, device='tiff', dpi=300)
+```
+
+
+### Normalization data
+-Ct values with test material per reviewer comments
+10/20/21  
+
+```{r}
+
+norm.ct.df<-read.csv('2021-10-20_Ct_normalization_formatted.csv')
+
+norm.ct.df$Ct_value[norm.ct.df$Platform=='m2000']<-norm.ct.df$Ct_value[norm.ct.df$Platform=='m2000']+10
+
+norm.ct.df<-norm.ct.df[norm.ct.df$Original_CT != '1000cp/ml',]
+
+
+ggplot(data=norm.ct.df, aes(y=Ct_value, x = factor(Platform))) +
+  #geom_violin(width=.8, adjust=2)+
+  geom_boxplot(width=.5, color="black",outlier.size=-1)+
+  geom_jitter(height = 0.0,width = 0.24,size = 1)+
+ggtitle('Ct values by pool tested on three different days')+
+  facet_grid(day~Original_CT)+
+  theme(axis.text.x = element_text(angle = 90))+
+  stat_summary(
+    fun.data = function(x)
+      data.frame(y= Inf, label = paste(round(mean(x), 1),'(', round(sd(x),1), ' )')),
+    geom = "text",
+    aes(group = Original_CT),
+    hjust = 0.5, vjust = 1,
+    position = position_dodge(width = 1.2),
+    size=2.5
+  )+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 90))+
+  xlab("Platform")+
+  ylab("Ct value")
+
+
+
+
+
+ggplot(data=norm.ct.df, aes(y=Ct_value, x = factor(Platform))) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.4, color="black")+
+  geom_jitter(height = 0.0,width = 0.24,size = 2,aes(shape = day, color=factor(Original_CT)))+ 
+  scale_y_continuous(breaks = seq(14,36,2),labels = seq(14,36,2))+
+  theme(axis.text.x = element_text(angle = 90))+
+ggtitle('Ct values by sample tested across multiple platforms over 3 days')
+
+
+pdf('2021-10-20_normalization_results_Ct_values.pdf')
+
+ggplot(data=norm.ct.df, aes(y=Ct_value, x = factor(Original_CT))) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.3, color="grey")+
+  geom_jitter(height = 0.0,width = 0.24,size = 2,aes(shape = day, color=factor(Platform)))+ 
+  scale_y_continuous(breaks = seq(14,36,2),labels = seq(14,36,2))+
+  theme(axis.text.x = element_text(angle = 90))+
+ggtitle('Ct values across platforms by categorical starting material ')+
+  theme_bw()
+
+
+norm.ct.df$all<-'All_samples_tested'
+
+ggplot(data=norm.ct.df, aes(y=Ct_value,x=all)) +
+  geom_violin(width=.7, adjust=2)+
+  geom_boxplot(width=.3, color="grey")+
+  geom_jitter(height = 0.0,width = 0.24,size = 2,aes(shape = day, color=factor(Platform)))+ 
+  scale_y_continuous(breaks = seq(14,36,2),labels = seq(14,36,2))+
+  theme(axis.text.x = element_text(angle = 90))+
+ggtitle('Ct values across platforms')+
+  theme_bw()
+
+# test linear model
+# ct explained by platform
+print(summary(lm(log1p(norm.ct.df$Ct_value)~norm.ct.df$Platform + norm.ct.df$Platform*norm.ct.df$Original_CT + norm.ct.df$Original_CT)))
+
+
+dev.off()
+
+
+# simple linear regression ct explained by platform:
+# not a good predictor
+
+summary(lm(formula = log1p(norm.ct.df$Ct_value) ~ norm.ct.df$Platform))
+```
+
+### Summary table for normalization
+```{r}
+
+norm.summary.df<-as.data.frame(expand_grid(unique(norm.ct.df$Platform), unique(norm.ct.df$Original_CT)))
+colnames(norm.summary.df)<-c('Platform','Pool_range')
+
+norm.summary.df$mean<-NA
+norm.summary.df$sd<-NA
+
+for(platform in norm.summary.df$Platform){
+  for(ct in norm.summary.df$Pool_range){
+    
+    current.mean<-mean(norm.ct.df$Ct_value[norm.ct.df$Platform ==platform & norm.ct.df$Original_CT==ct])
+    current.sd<-sd(norm.ct.df$Ct_value[norm.ct.df$Platform ==platform & norm.ct.df$Original_CT==ct])
+    
+    norm.summary.df$mean[norm.summary.df$Platform==platform & norm.summary.df$Pool_range==ct]<-current.mean
+     norm.summary.df$sd[norm.summary.df$Platform==platform & norm.summary.df$Pool_range==ct]<-current.sd
+    
+    
+  }
+}
+
+write.xlsx(norm.summary.df[order(norm.summary.df$Pool_range),], file='fig_jpegs_and_table/table_S1.xlsx')
+
+```
+

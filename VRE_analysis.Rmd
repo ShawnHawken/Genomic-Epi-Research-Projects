@@ -1,0 +1,931 @@
+---
+title: "VRE_analysis"
+author: "Shawn Whitefield"
+date: "January 21, 2015"
+output: html_document
+---
+
+This document is for keeping track of my VRE data analysis
+
+#### First read in the data
+```{r}
+#vre_panPCR_results
+vre_panPCR_results<- read.table(file="./vre_panPCR_results", header = T)
+
+#vre_mlst_profiles
+vre_mlst_results<- read.delim(file="./vre_mlst_profiles", header = T, sep = "\t")
+
+```
+
+####Clean up/format the datasets:
+Start with a summary of the datasets. It is not very informative, but do it anyway for good measure. Make sure that the data imported correctly and fix the variable names. Find any missing or duplicate observations in each dataset. Add ID variables for merging. 
+
+```{r}
+#vre_mlst_results
+summary(vre_mlst_results)
+#210 observations of 9 variables
+#look at variable names
+cols<-colnames(vre_mlst_results)
+#re-code "X" as row.names
+vre_mlst_results$sample_name<-vre_mlst_results$X
+#delete extra column "X"
+keep<- c("X.1" ,"atpA" ,"ddl", "gdh","purK" ,"gyd","pstS" ,"adk", "sample_name")
+vre_mlst_results<-vre_mlst_results[keep]
+#sort by sample name
+vre_mlst_results_samples<-as.data.frame(vre_mlst_results["sample_name"])
+#add id variable
+vre_mlst_results_samples$id<-"mlst"
+
+#vre_panPCR_results
+summary(vre_panPCR_results)
+#207 observations of 8 variables
+PCR_cols<-colnames(vre_panPCR_results)
+#figure out what 3 observations are missing from the vre_panPCR_results dataset
+vre_panPCR_results$sample_name<-rownames(vre_panPCR_results)
+#sort by sample name, this dataframe contains only 
+#the sample names in vre_panPCR_results
+vre_panPCR_results_samples<-as.data.frame(vre_panPCR_results["sample_name"])
+#add id
+vre_panPCR_results_samples$ID<-"panPCR"
+
+#find unique observations in each dataframe of sample names and ids
+both<-rbind(vre_mlst_results_samples,vre_panPCR_results_samples)
+n_occur<-data.frame(table(both$sample_name))
+#sort by frequency
+missing_pan_PCR<-as.data.frame(subset(n_occur, n_occur$Freq<2)) 
+dups<-as.data.frame(subset(n_occur, n_occur$Freq>2))
+#there are no duplicates between the mlst and panPCR datasets
+
+```
+I am missing:
+```{r}
+missing_pan_PCR
+#delete these three from the panPCR dataframe for analysis
+```
+Count number of genome files:
+```{r}
+#read in text doc of genome files
+vre_genome_file_names<- read.table(file="./vre_genome_file_names.txt", header = F)
+#there are 212 files, delete row 212 because that is the txt file that I made in unix that contains all of the genome file names
+vre_genome_file_names<-(vre_genome_file_names[-212,])
+vre_genome_file_names<-as.data.frame(vre_genome_file_names)
+vre_genome_file_names$sample_name<-vre_genome_file_names$vre_genome_file_names
+#give this dataframe an ID
+vre_genome_file_names$id="genome"
+#remove the vre_genome_file_names column because it is now redundant
+vre_genome_file_names$vre_genome_file_names<-NULL
+#PROBLEM! the genome names have *.fa while the mlst names do not
+#add .fa onto the mlst sample_name column
+genomes<-paste0(vre_mlst_results_samples$sample_name, ".fa")
+#add this list to the dataframe
+vre_mlst_results_samples$sample_name<-genomes
+#now this data frame is formatted exactly like the mlst and panPCR sample names data frames above. yay!
+
+#now find out what sample is in the genome list that is not in the mlst list
+#merge the dataframes for genome and mlst
+mlst_genome_names<-rbind(vre_mlst_results_samples, vre_genome_file_names)
+#create dataframe with frequency of the names
+mlst_genome_freq<-data.frame(table(mlst_genome_names$sample_name))
+#samples should have a frequency of 2 if they are in both datasets
+#want to know what sample is only in the genome set, so it would occur once
+extra_genome<-as.data.frame(subset(mlst_genome_freq, mlst_genome_freq$Freq<2))
+#make sure there are no duplicates
+dup_genomes<-as.data.frame(subset(mlst_genome_freq, mlst_genome_freq$Freq>2))
+#there are no duplicates between the mlst and genome datasets
+
+#make sure that there are no duplicates between the genomes and panPCR sets
+panPCR_names<-paste0(vre_panPCR_results_samples$sample_name, ".fa")
+vre_panPCR_results_samples$sample_name<-panPCR_names
+
+#merge the datasets
+pan_pcr_vs_genomes<-rbind(vre_panPCR_results_samples, vre_genome_file_names)
+#get frequencies
+panPCR_vs_genome_Freq<-data.frame(table(pan_pcr_vs_genomes$sample_name))
+#find observations with less than 2
+extra_genome_vs_pcr<-as.data.frame(subset(panPCR_vs_genome_Freq, panPCR_vs_genome_Freq$Freq<2))
+# the extra genome and extra mlst samples that I do not have in the panPCR dataset are the same:
+
+```
+#### Deal with missing data
+These are the missing samples:
+```{r}
+#extra genome
+extra_genome
+#missing pan_PCR
+missing_pan_PCR
+#extra_genome_vs_panPCR ie do they match? yes!
+extra_genome_vs_pcr
+```
+#### Create Final Data Frames for Analysis
+I am going to delete the 3 missing pan PCR samples, and the 1 extra genome from the genome list and mlst results. The final N that I will be analyzing with these 3 datasets is 207 complete cases (genome + mlst+ panPCR)
+
+
+
+```{r}
+#make final dataframes with removed samples from above
+
+#vre_panPCR_results
+vre_panPCR_results_final<- read.table(file="./vre_panPCR_results", header = T)
+
+#vre_mlst_profiles
+vre_mlst_results_final<- read.delim(file="./vre_mlst_profiles", header = T, sep = "\t")
+#remove the three samples
+#rename sample name variable
+vre_mlst_results_final$sample_name<-vre_mlst_results_final$X
+#and rename the squence type variable
+vre_mlst_results_final$seq_type<-vre_mlst_results_final$X.1
+#delete old rows
+vre_mlst_results_final$X<-NULL
+vre_mlst_results_final$X.1<-NULL
+#now delete the observations that are not in the panPCR data set
+#0127 = row 123
+#0038 = row 102
+#0027 = row 92
+#
+vre_mlst_results_final<-vre_mlst_results_final[-c(123,102,92),]
+row.names(vre_mlst_results_final)<-NULL
+#this data frame is now good to go!
+#rename dataframe so its shorter
+mlstDF<-vre_mlst_results_final
+
+#clean-up variable names for pan PCR dataset
+vre_panPCR_results_final$sample_name<-row.names(vre_panPCR_results_final)
+row.names(vre_panPCR_results_final)<-NULL
+#rename dataframe so its shorter
+panPCRDF<-vre_panPCR_results_final
+
+#these are the dataframes to use:
+mlstDf
+panPCRDF
+
+#now check for complete mlst observations
+#remove observations without MLST sequence type
+mlstDF$test<-mlstDF$seq_type=='ST'
+#also drop these observtions from panPCR set
+panPCRDF$test<-mlstDF$test
+#sort by the test variable
+mlstDF<-mlstDF[order(mlstDF$test),]
+panPCRDF<-panPCRDF[order(panPCRDF$test),]
+#subset the ones that are false ie they have a MLST sequence type
+mlstDF<-mlstDF[which(mlstDF$test==FALSE),]
+panPCRDF<-panPCRDF[which(panPCRDF$test==FALSE),]
+
+
+#need to remove these from the genomes used for parsnp alignment:
+# EnGen0124_genome
+# EnGen0164_genome
+# EnGen0253_genome
+# EnGen0263_genome
+
+#moved these to new directory called incomplete_mlst
+
+#create tables of these so that I can use them in other analysis wihtout having to run all the above code
+
+write.table(mlstDF,"mlstdf_cleaned.txt")
+write.table(panPCRDF,"panPCRDF_cleaned.txt")
+
+
+```
+#### Analyze the PanPCR data!
+```{r}
+#Goal create new variables for each combination of bands from each of the primer sets
+
+#first find out how many had bands for each primer set
+sum.VRE_PanPCR_1.1<-sum(panPCRDF$VRE_PanPCR_1.1)
+sum.VRE_PanPCR_1.2<-sum(panPCRDF$VRE_PanPCR_1.2)
+sum.VRE_PanPCR_1.3<-sum(panPCRDF$VRE_PanPCR_1.3)
+sum.VRE_PanPCR_1.4<-sum(panPCRDF$VRE_PanPCR_1.4)
+sum.VRE_PanPCR_1.5<-sum(panPCRDF$VRE_PanPCR_1.5)
+sum.VRE_PanPCR_1.6<-sum(panPCRDF$VRE_PanPCR_1.6)
+sum.VRE_PanPCR_1.7<-sum(panPCRDF$VRE_PanPCR_1.7)
+sum.VRE_PanPCR_1.8<-sum(panPCRDF$VRE_PanPCR_1.8)
+#make list of the sums
+sum.list<-c(sum.VRE_PanPCR_1.1,sum.VRE_PanPCR_1.2, sum.VRE_PanPCR_1.3,sum.VRE_PanPCR_1.4,sum.VRE_PanPCR_1.5,sum.VRE_PanPCR_1.6,sum.VRE_PanPCR_1.7,sum.VRE_PanPCR_1.8)
+#get list of names for labeling the bars
+plotnames<-((colnames(panPCRDF))[-9])
+# find proportions 
+percent<-(sum.list/207)*100
+#plot
+barplot(sum.list,names=plotnames,las=3, col=rainbow(9), main="Total panPCR Bands by Primer Pair", ylab="# Positive bands", cex.names=.5, ylim=c(0,200))
+
+#clearly there is a difference between the primer sets 
+
+
+```
+
+#### Make Distance Matrix for panPCR data
+```{r}
+#make a matrix with the pairwise differences between samples 
+panPCRdf<-panPCRDF #labeling issue
+# make all of the primer results into a string
+panPCRdf$result_string<-paste(panPCRdf$VRE_PanPCR_1.1,panPCRdf$VRE_PanPCR_1.2,panPCRdf$VRE_PanPCR_1.3,panPCRdf$VRE_PanPCR_1.4,panPCRdf$VRE_PanPCR_1.5,panPCRdf$VRE_PanPCR_1.6,panPCRdf$VRE_PanPCR_1.7,panPCRdf$VRE_PanPCR_1.8)
+#get rid of white space in the string
+panPCRdf$result_string<-gsub(" ","",panPCRdf$result_string,fixed=TRUE)
+
+#sort by the result_string variable
+# just want to see what kinds there are
+attach(panPCRdf)
+sort.panPCRdf<-panPCRdf[order(result_string),]
+detach(panPCRdf)
+
+#want to know how many unique patterns there are:
+uniq<-unique(sort.panPCRdf$result_string)
+length(uniq)
+#there are 61 unique types!
+
+##### GOAL:compare the strings in pairwise way
+#there are 8 positions
+#record the number of positions that they differ from each other in matrix (0-8)
+
+#first: create empty matrix that is indexed by the sample names
+
+empty<-matrix(NA, nrow=203, ncol=203, dimnames=list(panPCRDF$sample_name, mlstDF$sample_name))
+
+
+
+#####WRITE FUNCTIONS TO SET-UP FILLING THE MATRIX
+
+#function to compare 2 strings at 1 given position:
+compareStrings<-function(rs1,rs2,position=0){
+#first index first sample vs. first index second sample  
+posA<-as.integer(substring(rs1, position,position)) #pick index from each r,c
+posB<-as.integer(substring(rs2, position,position))
+if(posA != posB){(dif=1)} else {(dif=0)} # if unequal assign 1 else assign 0
+dif<<-dif #return difference to global environment
+}
+
+#Function to compare all of the positions in two strings
+compareAllpos<-function(rs1,rs2){
+compareStrings(rs1,rs2, 1)
+  one<-dif
+compareStrings(rs1,rs2, 2)
+  two<-dif
+compareStrings(rs1,rs2, 3)
+  three<-dif
+compareStrings(rs1,rs2, 4)
+  four<-dif
+compareStrings(rs1,rs2, 5)
+  five<-dif
+compareStrings(rs1,rs2, 6)
+  six<-dif
+compareStrings(rs1,rs2, 7)
+  seven<-dif
+compareStrings(rs1,rs2, 8)
+  eight<-dif
+sums<<-sum(one,two,three,four,five,six,seven,eight) #sum position differences to global env
+return(sums)
+}
+
+#FINALLY: function to fill matrix:
+#pick a cell in this empty matrix that is indexed in same order as panPCRdf
+fillMatrix<-function(matrix){
+  for(i in 1:nrow(matrix)){
+  for(j in 1:ncol(matrix)){
+    #get matching row and column index from panPCRdf$result_string
+    rs1<-panPCRdf$result_string[i] 
+    rs2<-panPCRdf$result_string[j]
+    #apply the compareAllpos function to these 2 strings
+    compareAllpos(rs1,rs2) 
+    empty[i,j]<-sums #fill that cell of the matrix with the output difference
+      }
+    }
+  full<<-empty
+}
+
+fillMatrix(empty)
+#reassign the filled distance matrix to a variable with a better name
+panPCRdistMatrix<-full
+
+```
+#### Make Distance Matrix for mlst data
+```{r}
+#first separate the confidence match? in sequence type in ( ) from each mlst band result
+
+#copy the dataframe because I am going to be manipulating it
+mlstWork<-mlstDF 
+#create a string variable for each sequence type at each locus
+#all of the types are 2 characters so I need to make all of the 1 character ones into
+#verify that there are no 3 character sequence types
+mlstCol<-colnames(mlstWork)
+mlstCol
+#level for all genes
+levels(mlstWork$atpA)
+levels(mlstWork$ddl)
+levels(mlstWork$gdh)
+levels(mlstWork$purK)
+levels(mlstWork$gyd)
+levels(mlstWork$pstS)
+levels(mlstWork$adk)
+#plot how many different kinds there are for each allele:
+atpA<-length(levels(mlstWork$atpA))
+dll<-length(levels(mlstWork$ddl))
+gdh<-length(levels(mlstWork$gdh))
+purK<-length(levels(mlstWork$purK))
+gyd<-length(levels(mlstWork$gyd))
+pstS<-length(levels(mlstWork$pstS))
+adk<-length(levels(mlstWork$adk))
+alleles<-c(atpA,dll,gdh,purK,gyd,pstS,adk)
+bar.names<-c("atpA","dll","gdk","purK","gyd","pstS","adk")
+barplot(alleles, col=rainbow(7),names=bar.names,ylim=c(0,25))
+#there is are differences in the amount of diversity at each locus 
+#is this true with stats?
+#prop test
+alleleSum<-sum(alleles)
+#guess if equal proportions = alleleSum/7 loci
+alleleSum/7 #round down to 15
+alleleTest<-c(15,15,15,15,15,15,15)
+
+prop.test(alleles,alleleTest)
+binom.test(18,108,.065)
+
+
+
+#two characters so 1 will be 01 , so it has the same length as 44
+
+#new variable for atpA without ()
+mlstWork$atpA_P<-substr(as.character(mlstWork$atpA),1,2)
+#new variable for ddl 
+mlstWork$ddl_P<-substr(as.character(mlstWork$ddl),1,2)
+#new variable for gdh
+mlstWork$gdh_P<-substr(as.character(mlstWork$gdh),1,2)
+#new variable for purk
+mlstWork$purK_P<-substr(as.character(mlstWork$purK),1,2)
+#new variable for gyd
+mlstWork$gyd_P<-substr(as.character(mlstWork$gyd),1,2)
+#new variable for pstS
+mlstWork$pstS_P<-substr(as.character(mlstWork$pstS),1,2)
+#new variable for adk
+mlstWork$adk_P<-substr(as.character(mlstWork$adk),1,2)
+
+
+
+#now they are all 2 character strings and I can put them all together in a single string
+mlstWork$results_string<-paste(mlstWork$atpA_P,mlstWork$ddl_P, mlstWork$gdh_P, mlstWork$purK_P, mlstWork$gyd_P, mlstWork$pstS_P, mlstWork$adk_P)
+
+#for my comparison I will combare 2 characters instead of 1 character as I did for the pan PCR matrix. that way "1 " can be compared with "15"
+
+# first adjust compareStrings function to take 2 characters
+#function to compare 2 strings at 2 given consecutive positions:
+compareStrings2pos<-function(rs1,rs2,position1=0,position2=0){
+#first index first sample vs. first index second sample  
+posA<-as.integer(substring(rs1, position1,position2)) #pick index from each r,c
+posB<-as.integer(substring(rs2, position1,position2))
+if(posA != posB){(dif=1)} else {(dif=0)} # if unequal assign 1 else assign 0
+dif<<-dif #return difference to global environment
+}
+
+#next adjust the CompareAllpos function for the length of the mlstWork$results_string
+#Function to compare difference between every 2 consecutive positions between two strings. the numbers are space delim.
+compareAllpos2<-function(rs1,rs2){
+compareStrings2pos(rs1,rs2, 1,2)
+  one<-dif
+compareStrings2pos(rs1,rs2,4,5)
+  two<-dif
+compareStrings2pos(rs1,rs2,7,8)
+  three<-dif
+compareStrings2pos(rs1,rs2,10,11)
+  four<-dif
+compareStrings2pos(rs1,rs2, 13,14)
+  five<-dif
+compareStrings2pos(rs1,rs2, 16,17)
+  six<-dif
+compareStrings2pos(rs1,rs2,19,20)
+  seven<-dif
+sums<<-sum(one,two,three,four,five,six,seven) #sum position differences to global env
+return(sums)
+}
+
+#now fill in the matrix. can use same matrix called 'empty' from above
+#FINALLY: function to fill matrix:
+#pick a cell in this empty matrix that is indexed in same order as panPCRdf
+fillMatrixMlst<-function(matrix){
+  for(i in 1:nrow(matrix)){
+  for(j in 1:ncol(matrix)){
+    #get matching row and column index from panPCRdf$result_string
+    rs1<-mlstWork$results_string[i] 
+    rs2<-mlstWork$results_string[j]
+    #apply the compareAllpos function to these 2 strings
+    compareAllpos2(rs1,rs2) 
+    empty[i,j]<-sums #fill that cell of the matrix with the output difference
+      }
+    }
+  full<<-empty
+}
+#fill up the matrix with the mlst distances!
+#give it a better name
+mlstdistMatrix<-fillMatrixMlst(empty)
+
+```
+#### Compare the mlst and panPCR distance matrices 
+```{r}
+#mlstdistMatrix
+#panPCRdistMatrix
+#see what a plot looks like
+#want to plot each point x vs every other point y
+
+#ie plot every cell in bottom tri matrix 1 with matching cell matrix 2
+#get lower tri panPCR
+panPCRLt<-lower.tri(panPCRdistMatrix)
+#get lower tri mlst
+mlstLT<-lower.tri(mlstdistMatrix)
+
+#plot
+plot(jitter(mlstdistMatrix[mlstLT],2),jitter(panPCRdistMatrix[panPCRLt],2), type="p", col="black",xlim=c(0,8),ylim=c(0,8), main = "Pairwise Genome Encoding Differences", ylab= "Pan-PCR pairwise differences", xlab="MLST pairwise differences", cex=.1)
+
+
+
+
+
+```
+#### Build panPCR and MLST Trees like Fig5.B
+```{r}
+#convert to distance objects
+panPCRasDist<-as.dist(panPCRdistMatrix)
+mlstasDist<-as.dist(mlstdistMatrix)
+#test plot
+plot(hclust(panPCRasDist), hang=-1, main="pan-PCR Tree", cex=.2, xlab=NA )
+summary(hclust(panPCRasDist))
+#test plot
+plot(hclust(mlstasDist), hang=-1, main="MLST Tree", cex=.2, xlab=NA)
+summary(hclust(mlstasDist))
+#probably actually want a phylogenetic tree
+#trying ape package
+install.packages("ape")
+library(ape)
+par(mfrow=c(1,1))
+plot(as.phylo(hclust(mlstasDist)), cex =.2, main="MLST Tree", font=3, label.offset=.05)
+# nodes
+summary(as.phylo(hclust(mlstasDist)))
+#plot panPCR
+plot(as.phylo(hclust(panPCRasDist)), cex =.2, main="panPCR Tree", font=3, label.offset=.05)
+#nodes panPCR
+summary(as.phylo(hclust(panPCRasDist)))
+
+#test the cophyloplot function
+#make them trees
+mlstTree<-as.phylo(hclust(mlstasDist))
+panPCRTree<-as.phylo(hclust(panPCRasDist))                   
+#create association matrix
+association<-cbind(mlstTree$tip.label, panPCRTree$tip.label)
+#plot
+cophyloplot((as.phylo(hclust(mlstasDist))), ((as.phylo(hclust(panPCRasDist)))), assoc=association,length.line=4, space=80, gap=100, rotate=TRUE,)
+
+```
+#### try to import the genome file names from the parsnp output
+```{r}
+library(ape)
+parsnp_tree<-read.tree("/Users/shawnwhitefield/Desktop/Snitkin_lab_Winter_2015/VRE/VRE_parsnp_no_rec_filter/parsnp.tree") #read the tree form parsnp output
+Genomes_included_parsnp<-parsnp_tree$tip.label #get the tip.labels
+genomes_included_df<-as.data.frame(Genomes_included_parsnp) #makeit into a dataframe
+
+#clean-up names to make them match the format of the mlst and panPCR data
+# need to delete the commas
+colnames(genomes_included_df)<-"sample_name" #rename variable heading
+
+parsnp_names<-as.data.frame(gsub("'","", genomes_included_df$sample_name)) #delete the '
+colnames(parsnp_names)<-"sample_name"
+parsnp_names<-as.data.frame(gsub(".fa(.srt)?$","", parsnp_names$sample_name, perl=TRUE))
+#### EXPORT this as a dataframe to use for moving files for parsnp
+write.table(parsnp_names, file="/Users/shawnwhitefield/Desktop/Snitkin_lab_Winter_2015/VRE/VRE_parsnp_no_rec_filter/parsnp_names.txt", sep=",",row.names=FALSE,)
+parsnp_names<-read.table('/Users/shawnwhitefield/Desktop/Snitkin_lab_Winter_2015/VRE/VRE_parsnp_no_rec_filter/parsnp_names.txt', header=T)
+parsnp_names<-sub(".fa","",parsnp_names$sample_name) #delete the.fa
+colnames(parsnp_names)<-"sample_name"
+
+#now figure out what ones are in the genome set but not in the mlst and panPCR
+mlst_Names<-as.data.frame(sort(mlstDF$sample_name))
+colnames(mlst_Names)<-"sample_name"
+genome_Names<-as.data.frame(sort(parsnp_names$sample_name))
+colnames(genome_Names)<-"sample_name"
+in_genome_set<-intersect(mlst_Names$sample_name, genome_Names$sample_name)
+in_genome_set<-as.data.frame(in_genome_set)
+#####This is the intersection of the genomes included in parsnp AKA the ones I should include in the plot
+colnames(in_genome_set)<-"sample_name"
+
+
+#I have the two distance matrices and now I want to take the intersection of those with the in_genome_set
+#want to drop the rows in the mlstdist matrix that are not in in_genome_set
+
+
+#modify the script from above used to compare the distance matrices with the full set,so it only takes the intersection between the in_genome_set sample_names and dimnames of the matricies for the plot
+
+#compare to in_genome_set sample_name 
+#create logical vector of length = 207 for which ones to include
+mlst_to_include<-(rownames(mlstdistMatrix) %in% in_genome_set$sample_name)
+panPCR_to_include<-(rownames(panPCRdistMatrix) %in% in_genome_set$sample_name)
+
+#apply the logical vector to the distance matrices to exclude the ones that should not be included and are not in the in_genome_set
+
+mlst_adj<-mlstdistMatrix[mlst_to_include, mlst_to_include]
+panPCR_adj<-panPCRdistMatrix[panPCR_to_include, panPCR_to_include]
+
+#plot the ones that were included
+plot(jitter(mlst_adj[lower.tri(mlst_adj)],2),jitter(panPCR_adj[lower.tri(panPCR_adj)],2), type="p", col="black",xlim=c(0,8),ylim=c(0,8), main = "Pairwise Genome Encoding Differences", ylab= "Pan-PCR pairwise differences", xlab="MLST pairwise differences", cex=.1)
+
+
+
+```
+####make list of genomes that parsnp kicked out
+```{r}
+parsnp_names<-read.table("parsnp_names.txt", header=T)
+parsnp_names$ID<-"parsnp_names"
+
+row.names(vre_panPCR_results_samples)<-NULL
+vre_panPCR_results_samples$id<-NULL
+vre_panPCR_results_samples$ID<-"panPCR"
+vre_panPCR_results_samples$sample_name<-paste0(vre_panPCR_results_samples$sample_name,".fa")
+
+genome_PP_names<-rbind(vre_panPCR_results_samples, parsnp_names)
+occur<-data.frame(table(genome_PP_names$sample_name))
+dropped_genomes<-as.data.frame(subset(occur,occur$Freq<2))
+
+
+##there are 93 obs, expecting 207-116 = 93 observarions
+#this is because of the .fa.srt suffix on 1 samples in the parsnp_names file
+#there are no files in the vre_panPCR_results_sampels file with this suffix.
+#therefore Efae_AC78_121410_genome.fa.srt from parsnp_names and
+# Efae_AC78_121410_genome.fa from vre_panPCR_results_samples
+# were contributed, when this genome should not be included int he "missing" dataframe.
+
+#deleting these
+dropped_genomes$sample_name<-dropped_genomes$Var1
+rownames(dropped_genomes)<-NULL
+dropped_genomes$Var1<-NULL
+dropped_genomes$Freq<-NULL
+
+
+dropped_genomes<-as.data.frame(dropped_genomes[-c(1,2), ])
+colnames(dropped_genomes)<-"sample_name"
+
+#print to file
+
+write.table(dropped_genomes,file="dropped_genomes.txt", sep=",", row.names=FALSE)
+
+```
+###try to get Newick file into R
+```{r}
+#use Ape package
+
+library(ape)
+tree<-read.tree("/Users/shawnwhitefield/Desktop/Snitkin_lab_Winter_2015/VRE/VRE_parsnp_no_rec_filter/parsnp.tree")
+#convert to distance matrix
+GenomeDistMatrix<-cophenetic(tree)
+
+
+#sort the matrix so order matches mlst and panPCR
+sortedGenomeMat<-GenomeDistMatrix[order(colnames(GenomeDistMatrix)),order(rownames(GenomeDistMatrix))]
+#make sure the names are the same
+dimnames(sortedGenomeMat)<-dimnames(panPCR_adj)
+
+#plot
+#plot the 116 mlst vs genome
+plot(jitter(sortedGenomeMat[lower.tri(sortedGenomeMat)],2),jitter(mlst_adj[lower.tri(mlst_adj)],2), type="p", col="black",xlim=c(0,.8),ylim=c(0,7), main = "Pairwise Genome Encoding Differences", ylab= "MLST pairwise differences", xlab="parsnp pairwise differences", cex=.2)
+
+#plot the 116 panPCR vs genome
+plot(jitter(sortedGenomeMat[lower.tri(sortedGenomeMat)],1),jitter(panPCR_adj[lower.tri(panPCR_adj)],1), type="p", col="black", main = "Pairwise Genome Encoding Differences", ylab= "panPCR pairwise differences", xlab="parsnp pairwise differences", cex=.2, xlim=c(0,.8), ylim=c(-1,7))
+
+
+
+
+#findout which genomes have 0 for parsnp pairwise differenes, but panPCR calls them different
+
+# these would have 0 for parsnp pairwise differece, but not 0 for panPCR
+#write function that compares two cells in lower tri of the panPCR matrix and the parsnp matrix.  If there is a zero in the parsnp matrix but not a zero in the corresponding cell of the panpcr matrix, then print the row names.
+
+#first look at distribution of the distances in the genome matrix
+parsnpHist<-hist(sortedGenomeMat[lower.tri(sortedGenomeMat)], main="distribution of parsnp distances")
+#and in the panPCR matrix
+PanPCRHist<-hist(panPCR_adj[lower.tri(panPCR_adj)], main="distribution of PanPCR distances")
+
+
+#select the observations that fit these categories from each distance matrix
+#panPCR not zeros
+PanPCR_not_zeros<-as.data.frame(which(panPCR_adj !=0, arr.ind=T))
+#make variable containing unique cell postion
+PanPCR_not_zeros$cell<-paste(PanPCR_not_zeros$row,PanPCR_not_zeros$col, sep=" ")
+PanPCR_not_zeros$sample_name<-rownames(PanPCR_not_zeros)
+PanPCR_not_zeros$ID<-"PANPCR"
+
+#parsnp close to zeros
+#make variable containing unique cell position
+#this dataframe has all of the rows and columns of sample names meeting this criteria:
+parsnp_similars<-as.data.frame(which(sortedGenomeMat !=0 & panPCR_adj !=0 &  sortedGenomeMat <00.00078125, arr.ind=T))
+parsnp_similars<-parsnp_similars[order(parsnp_similars$row, parsnp_similars$col),]
+
+
+###want to know what primers are identifying these samples as different
+
+#write loop that goes through the parsnp_similars df
+#picks the "row"" and "col" from each row
+#applies the "row" and "col" number to the panPCRDF116 df result_string
+#finds what positions they differ at between result_string row and result_string col
+#saves the positions same 0 or different 1 to an observation in df called compare primer_1 ...compareprimer_8
+
+FindBadPrimerFreq<-function(df1,df2){
+  for(i in 1:nrow(df1)){
+    rnum<-df1$row[i]
+    cnum<-df1$col[i]
+    rs1<-df2$result_string[rnum]
+    df1$rs1[i]<-rs1
+    rs2<-df2$result_string[cnum]
+    df1$rs2[i]<-rs2
+    compareStrings(rs1,rs2, 1)
+      one<-dif
+      df1$compare_primer_1[i]<-one
+    compareStrings(rs1,rs2, 2)
+      two<-dif
+      df1$compare_primer_2[i]<-two
+    compareStrings(rs1,rs2, 3)
+      three<-dif
+      df1$compare_primer_3[i]<-three
+    compareStrings(rs1,rs2, 4)
+      four<-dif
+      df1$compare_primer_4[i]<-four
+    compareStrings(rs1,rs2, 5)
+      five<-dif
+      df1$compare_primer_5[i]<-five
+    compareStrings(rs1,rs2, 6)
+      six<-dif
+      df1$compare_primer_6[i]<-six
+    compareStrings(rs1,rs2, 7)
+      seven<-dif
+      df1$compare_primer_7[i]<-seven
+    compareStrings(rs1,rs2, 8)
+      eight<-dif
+      df1$compare_primer_8[i]<-eight
+    df1$compare_primer_1
+  }
+  primer_freq_DF<<-df1
+}
+###yay! this works!
+#plot the frequency of each primer difference in a histogram
+
+#sums of 1's in each primer
+sumP1<-sum(primer_freq_DF$compare_primer_1)
+sumP2<-sum(primer_freq_DF$compare_primer_2)
+sumP3<-sum(primer_freq_DF$compare_primer_3)
+sumP4<-sum(primer_freq_DF$compare_primer_4)
+sumP5<-sum(primer_freq_DF$compare_primer_5)
+sumP6<-sum(primer_freq_DF$compare_primer_6)
+sumP7<-sum(primer_freq_DF$compare_primer_7)
+sumP8<-sum(primer_freq_DF$compare_primer_8)
+sum.list<-c(sumP1,sumP2,sumP3,sumP4,sumP5,sumP6,sumP7,sumP8)
+#plot to see distribution of primers that are identifying these as different
+barplot(sum.list,names=plotnames,las=3, col=rainbow(9), main="Parsnp similar & panPCR different by Primer Pair", ylab="# Positive bands", cex.names=.5, ylim=c(0,100))
+#create new variable to see how different these are pairwise
+primer_freq_DF$sumDiff<-sum(primer_freq_DF$compare_primer_1,primer_freq_DF$compare_primer_2,primer_freq_DF$compare_primer_3,primer_freq_DF$compare_primer_4,primer_freq_DF$compare_primer_5,primer_freq_DF$compare_primer_6,primer_freq_DF$compare_primer_7,primer_freq_DF$compare_primer_8)
+
+
+
+
+
+parsnp_similars$cell<-paste(parsnp_similars$row,parsnp_similars$col,sep=" ")
+parsnp_similars$ID<-"parsnp"
+parsnp_similars$sample_name<-rownames(parsnp_similars)
+
+#now find rownames where row and column match in both dataframes
+#make a dataframe that contains both
+parsnp_similars_PanPCR_not_zeros<-rbind(parsnp_similars,PanPCR_not_zeros)
+
+#get frequency table of sample names meeting the selection criteria
+parsnp_similars_PanPCR_not_zeros_Freq<-data.frame(table(parsnp_similars_PanPCR_not_zeros$sample_name))
+#select the ones that occur a lot to start with
+false_posPPCR<-as.data.frame(subset(parsnp_similars_PanPCR_not_zeros_Freq, parsnp_similars_PanPCR_not_zeros_Freq$Freq>115))
+false_posPPCR$sample_name<-false_posPPCR$Var1
+false_posPPCR$Var1<-NULL
+
+#there are 9 samples meeting this criteria
+#now check to see if there are any similarities between these with regards to their PanPCR profiles, ie are there certain genes that do not give a product that are in common with these 
+
+#look at the panPCR results for these 11 samples
+
+false_pos_panPCR_11<-as.data.frame(subset(panPCRdf, panPCRdf$sample_name %in% false_posPPCR$sample_name))
+#sort by result_string
+
+false_pos_panPCR_11<-false_pos_panPCR_9[order(false_pos_panPCR_11$result_string),]
+##!!!! wow they are all 0 at primer 1.4 and 1.6
+
+#####stats to see if the proportions are different than the percentage in the full 207 samples included in the original 
+
+#list of number of 1's from each primer set above plotted:
+sum.list
+
+#first find out how many had bands for each primer set
+sum11.VRE_PanPCR_1.1<-sum(false_pos_panPCR_11$VRE_PanPCR_1.1)
+sum11.VRE_PanPCR_1.2<-sum(false_pos_panPCR_11$VRE_PanPCR_1.2)
+sum11.VRE_PanPCR_1.3<-sum(false_pos_panPCR_11$VRE_PanPCR_1.3)
+sum11.VRE_PanPCR_1.4<-sum(false_pos_panPCR_11$VRE_PanPCR_1.4)
+sum11.VRE_PanPCR_1.5<-sum(false_pos_panPCR_11$VRE_PanPCR_1.5)
+sum11.VRE_PanPCR_1.6<-sum(false_pos_panPCR_11$VRE_PanPCR_1.6)
+sum11.VRE_PanPCR_1.7<-sum(false_pos_panPCR_11$VRE_PanPCR_1.7)
+sum11.VRE_PanPCR_1.8<-sum(false_pos_panPCR_11$VRE_PanPCR_1.8)
+
+sum.11.list<-list(c(sum11.VRE_PanPCR_1.1,sum11.VRE_PanPCR_1.2,sum11.VRE_PanPCR_1.3,sum11.VRE_PanPCR_1.4,sum11.VRE_PanPCR_1.5,sum11.VRE_PanPCR_1.6,sum11.VRE_PanPCR_1.7, sum11.VRE_PanPCR_1.8))
+
+sum.11.list
+
+#primer1
+prop.test(sum11.VRE_PanPCR_1.1 , 11, 0.3913043)
+#primer2
+prop.test(sum11.VRE_PanPCR_1.2 , 11, 0.8985507)
+#primer3
+prop.test(sum11.VRE_PanPCR_1.3 , 11, 0.1787440)
+#primer4
+prop.test(sum11.VRE_PanPCR_1.4 , 11, 0.3043478)
+#primer5
+prop.test(sum11.VRE_PanPCR_1.5 , 11, 0.5362319)
+#primer6
+prop.test(sum11.VRE_PanPCR_1.6 , 11, 0.2801932)
+#primer7
+prop.test(sum11.VRE_PanPCR_1.7 , 11, 0.3285024)
+#primer8
+prop.test(sum11.VRE_PanPCR_1.8 , 11, 0.7536232)
+
+#####NONE OF THESE ARE SIGNIFICANTLY DIFFERENT FROM THE DISTRIBUTION OF PRIMER BANDS IN THE ORIGINAL 207 SAMPLES
+
+###see if the distribution is actually different in the 116 that were actually included in the plot
+
+#subset the panPCRDF for sample names that are in the in_genome_set sample name
+panPCRDF116<-as.data.frame(subset(panPCRdf, panPCRdf$sample_name %in% in_genome_set$sample_name))
+
+#find proportion of 1's for each primer
+#first find out how many had bands for each primer set
+sum116.VRE_PanPCR_1.1<-sum(panPCRDF116$VRE_PanPCR_1.1)
+sum116.VRE_PanPCR_1.2<-sum(panPCRDF116$VRE_PanPCR_1.2)
+sum116.VRE_PanPCR_1.3<-sum(panPCRDF116$VRE_PanPCR_1.3)
+sum116.VRE_PanPCR_1.4<-sum(panPCRDF116$VRE_PanPCR_1.4)
+sum116.VRE_PanPCR_1.5<-sum(panPCRDF116$VRE_PanPCR_1.5)
+sum116.VRE_PanPCR_1.6<-sum(panPCRDF116$VRE_PanPCR_1.6)
+sum116.VRE_PanPCR_1.7<-sum(panPCRDF116$VRE_PanPCR_1.7)
+sum116.VRE_PanPCR_1.8<-sum(panPCRDF116$VRE_PanPCR_1.8)
+
+sum116.list<-c(sum116.VRE_PanPCR_1.1,sum116.VRE_PanPCR_1.2,sum116.VRE_PanPCR_1.3,sum116.VRE_PanPCR_1.4,sum116.VRE_PanPCR_1.5,sum116.VRE_PanPCR_1.6,sum116.VRE_PanPCR_1.7,sum116.VRE_PanPCR_1.8)
+
+sum116.list/116
+
+###NOW DO PROPORTION TEST ON THESE USING THE NEW PROPORTIONS IN ALL 116 FROM WHICH THESE 11 AROSE
+prop.test(sum11.VRE_PanPCR_1.1 , 11, 0.6379310)
+#primer2
+prop.test(sum11.VRE_PanPCR_1.2 , 11, .99999999)
+#primer3
+prop.test(sum11.VRE_PanPCR_1.3 , 11, 0.2586207)
+#primer4
+prop.test(sum11.VRE_PanPCR_1.4 , 11, 0.1465517)
+#primer5
+prop.test(sum11.VRE_PanPCR_1.5 , 11, 0.7672414 )
+#primer6
+prop.test(sum11.VRE_PanPCR_1.6 , 11, 0.2155172)
+#primer7
+prop.test(sum11.VRE_PanPCR_1.7 , 11, 0.2586207)
+#primer8
+prop.test(sum11.VRE_PanPCR_1.8 , 11, 0.8706897)
+
+#NONE ARE STATISTICALLY SIGNIFICANTLY DIFFERENT FROM THE PROPORTION OF BANDS FOR THAT PRIMER IN THE FULL 116
+
+
+
+
+
+
+
+
+
+
+
+```
+###plot 83 genomes with -x and without -x against each other to see if they are the same
+```{r}
+
+#make sure they are the same genomes included
+#no rec filter set
+library(ape)
+no_rec_filter_parsnp_tree<-read.tree("/Users/shawnwhitefield/Bio_info.packages/VRE_pan-PCR_analysis/2015-1-23_VRE/VRE_data/parsnp_with_refSeq_no_rec_filter_83/parsnp.tree") #read the tree form parsnp output
+no_rec_Genomes_included_parsnp<-no_rec_filter_parsnp_tree$tip.label #get the tip.labels
+no_rec_genomes_included_df<-as.data.frame(no_rec_Genomes_included_parsnp) #makeit into a dataframe
+colnames(no_rec_genomes_included_df)<-"no_rec_sample_name"
+no_rec_genomes_included_df<-no_rec_genomes_included_df[order(no_rec_sample_name)]
+no_rec_genomes_included_df<-as.data.frame(no_rec_genomes_included_df)
+no_rec_genomes_included_df$source<-"no_rec"
+colnames(no_rec_genomes_included_df)<-c("sample_name","source")
+
+#with rec filter set
+library(ape)
+with_rec_filter_parsnp_tree<-read.tree("/Users/shawnwhitefield/Bio_info.packages/VRE_pan-PCR_analysis/2015-1-23_VRE/VRE_data/parsnp_with_refSeq_with_rec_filter_83/parsnp.tree") #read the tree form parsnp output
+with_rec_Genomes_included_parsnp<-with_rec_filter_parsnp_tree$tip.label #get the tip.labels
+with_rec_genomes_included_df<-as.data.frame(with_rec_Genomes_included_parsnp) #makeit into a dataframe
+colnames(with_rec_genomes_included_df)<-"with_rec_sample_name"
+with_rec_genomes_included_df<-sort(with_rec_genomes_included_df$with_rec_sample_name)
+with_rec_genomes_included_df<-as.data.frame(with_rec_genomes_included_df)
+with_rec_genomes_included_df$source<-"with_rec"
+colnames(with_rec_genomes_included_df)<-c("sample_name","source")
+
+#compare sample names
+#find out which ones are missing/duplicated from each list
+both<-rbind(with_rec_genomes_included_df,no_rec_genomes_included_df)
+n_occur<-data.frame(table(both$sample_name))
+discrep<-as.data.frame(subset(n_occur, n_occur$Freq<2))
+
+
+#look at both to find out what tree the samples came from that are only in 1:
+#55 'EnGen0025_genome.fa'    1  with_rec  55
+#57 'EnGen0036_genome.fa'    1  with_rec  57
+#59 'EnGen0049_genome.fa'    1  with_rec  59
+#81 'EnGen0323_genome.fa'    1  with_rec  81
+#84 'EnGen0045_genome.fa'    1  no_rec    108
+#85 'EnGen0046_genome.fa'    1  no_rec    109
+#86 'EnGen0149_genome.fa'    1  no_rec    110
+#87 'EnGen0377_genome.fa'    1  no_rec    123
+
+
+
+ #                          sample_name   source
+
+
+# 4 samples are unique to with and without the recombination filter
+
+#I will delete these ones from the tree files, and then create distance matrices with 79 genomes included and then plot them against each other 
+
+
+#start with tree again: 
+
+
+#with rec filter set
+library(ape)
+with_rec_filter_parsnp_tree<-read.tree("/Users/shawnwhitefield/Bio_info.packages/VRE_pan-PCR_analysis/2015-1-23_VRE/VRE_data/parsnp_with_refSeq_with_rec_filter_83/parsnp.tree") #read the tree form parsnp output
+
+
+#convert to distance matrix
+With_rec_GenomeDistMatrix<-cophenetic(with_rec_filter_parsnp_tree)
+
+#delete the observations from above
+
+ #                          sample_name   source
+#55 'EnGen0025_genome.fa'    1  with_rec  55
+#57 'EnGen0036_genome.fa'    1  with_rec  57
+#59 'EnGen0049_genome.fa'    1  with_rec  59
+#81 'EnGen0323_genome.fa'    1  with_rec  81
+
+With_rec_GenomeDistMatrix<-With_rec_GenomeDistMatrix[-c(43,36,9,6),-c(43,36,9,6)]
+
+
+
+library(ape)
+no_rec_filter_parsnp_tree<-read.tree("/Users/shawnwhitefield/Bio_info.packages/VRE_pan-PCR_analysis/2015-1-23_VRE/VRE_data/parsnp_with_refSeq_no_rec_filter_83/parsnp.tree") #read the tree form parsnp output
+
+#convert to distance matrix
+no_rec_GenomeDistMatrix<-cophenetic(no_rec_filter_parsnp_tree)
+
+#delete the observations from above
+
+
+ #                          sample_name   source
+#84 'EnGen0045_genome.fa'    1  no_rec    108
+#85 'EnGen0046_genome.fa'    1  no_rec    109
+#86 'EnGen0149_genome.fa'    1  no_rec    110
+#87 'EnGen0377_genome.fa'    1  no_rec    123
+
+#looked at matrix to find indices
+no_rec_GenomeDistMatrix<-no_rec_GenomeDistMatrix[-c(48,23,10,7),-c(48,23,10,7)]
+
+#sort the matrices to get them in the same order
+
+no_rec_GenomeDistMatrix<-no_rec_GenomeDistMatrix[order(colnames(no_rec_GenomeDistMatrix)),order(rownames(no_rec_GenomeDistMatrix))]
+
+With_rec_GenomeDistMatrix<-With_rec_GenomeDistMatrix[order(colnames(With_rec_GenomeDistMatrix)),order(rownames(With_rec_GenomeDistMatrix))]
+
+#plot distance matrices 
+#plot the rec vs no rec filter
+plot((no_rec_GenomeDistMatrix[lower.tri(no_rec_GenomeDistMatrix)]),(With_rec_GenomeDistMatrix[lower.tri(With_rec_GenomeDistMatrix)]), type="p", col="black",xlim=c(0,.8),ylim=c(0,.8), main = "Pairwise Genome Encoding Differences", ylab= "with recombination filter", xlab="without recombination filter", cex=.2)
+
+#what happens if i plot the same thing by the same thing...
+plot((no_rec_GenomeDistMatrix[lower.tri(no_rec_GenomeDistMatrix)]),(no_rec_GenomeDistMatrix[lower.tri(no_rec_GenomeDistMatrix)]), type="p", col="black",xlim=c(0,.8),ylim=c(0,.8), main = "Pairwise Genome Encoding Differences", ylab= "with recombination filter", xlab="without recombination filter", cex=.2)
+
+
+
+#quantify correlation between two distance matrices
+#mantel test
+
+withRec<-dist(With_rec_GenomeDistMatrix)
+noRec<-dist(no_rec_GenomeDistMatrix)
+
+mantel.rtest(withRec, noRec, nrepet=9999)
+
+#this plot is not informative.  I am not sure why the 83 genomes that were included are not the same for with recombination and without recombination. 
+
+
+```
+###LS BSR matrix / pan genome analysis
+```{r}
+read.table
+
+#LSBSR matrix
+LSBSR_mat<-read.table(file="~/bsr_matrix_values.txt")
+#vre_panPCR_results
+vre_panPCR_results<- read.table(file="./vre_panPCR_results", header = T)
+
+
+```
+
+
+
+
+
